@@ -91,3 +91,6 @@ def test__trade():
     assert sorted(holdings["B"], key=lambda h: h.purchase_date)[
         -1
     ].purchase_date == date(2026, 1, 3)
+
+    # Sell all of oldest lot of A, oone of 2nd lot of A, buy B.
+    assert len(new_portfolio.trades) == 3
