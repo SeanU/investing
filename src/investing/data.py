@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import TypeAlias
 
 import polars as pl
@@ -36,7 +36,9 @@ def load_ticker_dividends(path: str, ticker: Ticker) -> list[Dividend]:
             row["Dividend"],
             row["Adjusted Dividend"],
             row["Ex-Dividend Date"].date(),
-            row["Payment Date"].date(),
+            row["Payment Date"].date()
+            if row["Payment Date"]
+            else row["Ex-Dividend Date"].date() + timedelta(days=3),
         )
         for row in df.iter_rows(named=True)
     ]

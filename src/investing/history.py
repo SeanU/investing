@@ -10,10 +10,18 @@ class SecurityHistory:
     prices: list[data.Price]
     dividends: list[data.Dividend]
 
+    @property
+    def end_date(self) -> date:
+        return max(price.date for price in self.prices)
+
 
 @dataclass
 class MarketHistory:
     securities: dict[data.Ticker, SecurityHistory]
+
+    @property
+    def end_date(self) -> date:
+        return max(history.end_date for history in self.securities.values())
 
     def get_price(self, ticker: data.Ticker, as_of: date) -> float:
         prices = self.securities[ticker].prices
@@ -29,8 +37,8 @@ def load_market_history(price_path: str, dividend_path: str) -> MarketHistory:
     assert len(prices) == len(dividends), "Prices and dividends must match"
 
     return MarketHistory(
-        [
-            SecurityHistory(ticker, prices[ticker], dividends[ticker])
+        {
+            ticker: SecurityHistory(ticker, prices[ticker], dividends[ticker])
             for ticker in prices
-        ]
+        }
     )

@@ -12,10 +12,16 @@ class Holding:
     purchase_date: date
     purchase_price: float
     quantity: float
+    current_date: date
+    current_price: float
 
     @property
     def basis(self) -> float:
         return self.purchase_price * self.quantity
+
+    @property
+    def current_value(self) -> float:
+        return self.current_price * self.quantity
 
 
 @dataclass
@@ -26,6 +32,23 @@ class Trade:
     trade_date: date
     price: float
     quantity: float
+
+
+@dataclass
+class HoldingTarget:
+    ticker: Ticker
+    weight: int
+
+
+@dataclass
+class AssetAllocation:
+    targets: list[HoldingTarget]
+
+    @property
+    def proportions(self) -> dict[Ticker, float]:
+        total_weight = sum(target.weight for target in self.targets)
+
+        return {target.ticker: target.weight / total_weight for target in self.targets}
 
 
 def sell(
@@ -39,6 +62,8 @@ def sell(
             holding.purchase_date,
             holding.purchase_price,
             holding.quantity - quantity,
+            holding.current_date,
+            holding.current_price,
         )
 
     return (
@@ -52,7 +77,7 @@ def buy(
 ) -> tuple[Holding, Trade]:
 
     return (
-        Holding(ticker, trade_date, price, quantity),
+        Holding(ticker, trade_date, price, quantity, trade_date, price),
         Trade("buy", ticker, None, trade_date, price, quantity),
     )
 
@@ -63,10 +88,11 @@ class Portfolio:
     holdings: list[Holding]
     trades: list[Trade] = field(default_factory=list)
 
+    @property
     def total_value(self) -> float:
         """Get value for whole portlfolio."""
 
-        return sum(holding.basis for holding in self.holdings)
+        return sum(holding.current_value for holding in self.holdings)
 
     def holdings_by_ticker(self) -> dict[Ticker, list[Holding]]:
         tickers = {holding.ticker for holding in self.holdings}
@@ -80,32 +106,25 @@ class Portfolio:
         """Get total position value by ticker."""
 
         return {
-            ticker: sum(holding.basis for holding in holdings)
+            ticker: sum(holding.current_value for holding in holdings)
             for ticker, holdings in self.holdings_by_ticker().items()
         }
 
-    def trade(
+    def sell(
         self,
-        *,
-        sell_ticker: Ticker,
-        buy_ticker: Ticker,
+        ticker: Ticker,
         amount: float,
         trade_date: date,
         prices: MarketHistory,
     ) -> Portfolio:
-        sell_price = prices.get_price(sell_ticker, trade_date)
+        sell_price = prices.get_price(ticker, trade_date)
         sell_quantity = amount / sell_price
-
-        buy_price = prices.get_price(buy_ticker, trade_date)
-        buy_quantity = amount / buy_price
-
-        # generate new holdings for security to sell
         current_holdings = [
-            holding for holding in self.holdings if holding.ticker == sell_ticker
+            holding for holding in self.holdings if holding.ticker == ticker
         ]
         current_holdings.sort(key=lambda h: h.purchase_date)
         remaining_holdings = [
-            holding for holding in self.holdings if holding.ticker != sell_ticker
+            holding for holding in self.holdings if holding.ticker != ticker
         ]
         new_trades = []
 
@@ -124,10 +143,31 @@ class Portfolio:
                 if remainder:
                     remaining_holdings.append(remainder)
 
-        # generate new holding for security to buy
-        new_holding, trade = buy(buy_ticker, buy_price, buy_quantity, trade_date)
-        remaining_holdings.append(new_holding)
-        new_trades.append(trade)
+        return Portfolio(trade_date, remaining_holdings, self.trades + new_trades)
 
-        # compose and return new portfolio
-        return Portfolio(date.today(), remaining_holdings, self.trades + new_trades)
+    def buy(
+        self,
+        ticker: Ticker,
+        amount: float,
+        trade_date: date,
+        prices: MarketHistory,
+    ) -> Portfolio:
+        buy_price = prices.get_price(ticker, trade_date)
+        buy_quantity = amount / buy_price
+        new_holding, new_trade = buy(ticker, buy_price, buy_quantity, trade_date)
+        return Portfolio(
+            trade_date, self.holdings + [new_holding], self.trades + [new_trade]
+        )
+
+    def trade(
+        self,
+        *,
+        sell_ticker: Ticker,
+        buy_ticker: Ticker,
+        amount: float,
+        trade_date: date,
+        prices: MarketHistory,
+    ) -> Portfolio:
+        return self.sell(sell_ticker, amount, trade_date, prices).buy(
+            buy_ticker, amount, trade_date, prices
+        )

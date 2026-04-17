@@ -9,24 +9,24 @@ def test__total_value():
     portfolio = p.Portfolio(
         date.today(),
         [
-            p.Holding("A", date.today(), 1, 1),
-            p.Holding("B", date.today(), 2, 2),
-            p.Holding("C", date.today(), 3, 3),
-            p.Holding("D", date.today(), 4, 4),
+            p.Holding("A", date.today(), 1, 1, date.today(), 1),
+            p.Holding("B", date.today(), 2, 2, date.today(), 2),
+            p.Holding("C", date.today(), 3, 3, date.today(), 3),
+            p.Holding("D", date.today(), 4, 4, date.today(), 4),
         ],
     )
 
-    assert portfolio.total_value() == 1 + 4 + 9 + 16
+    assert portfolio.total_value == 1 + 4 + 9 + 16
 
 
 def test__value_by_ticker():
     portfolio = p.Portfolio(
         date.today(),
         [
-            p.Holding("A", date.today(), 1, 1),
-            p.Holding("B", date.today(), 2, 2),
-            p.Holding("A", date.today(), 3, 3),
-            p.Holding("B", date.today(), 4, 4),
+            p.Holding("A", date.today(), 1, 1, date.today(), 1),
+            p.Holding("B", date.today(), 2, 2, date.today(), 2),
+            p.Holding("A", date.today(), 3, 3, date.today(), 3),
+            p.Holding("B", date.today(), 4, 4, date.today(), 4),
         ],
     )
 
@@ -64,10 +64,10 @@ def test__trade():
     portfolio = p.Portfolio(
         date.today(),
         [
-            p.Holding("A", date(2026, 1, 1), 1.0, 10),
-            p.Holding("A", date(2026, 1, 2), 1.5, 10),
-            p.Holding("B", date(2026, 1, 1), 2.0, 10),
-            p.Holding("B", date(2026, 1, 2), 2.25, 10),
+            p.Holding("A", date(2026, 1, 1), 1.0, 10, date(2026, 1, 1), 1.0),
+            p.Holding("A", date(2026, 1, 2), 1.5, 10, date(2026, 1, 2), 1.5),
+            p.Holding("B", date(2026, 1, 1), 2.0, 10, date(2026, 1, 1), 2.0),
+            p.Holding("B", date(2026, 1, 2), 2.25, 10, date(2026, 1, 2), 2.25),
         ],
     )
 
