@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 
 from investing.history import load_market_history
 from investing.portfolio import AssetAllocation, HoldingTarget
