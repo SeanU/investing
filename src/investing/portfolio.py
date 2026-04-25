@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
 
-from .data import Ticker
+from .data import Dividend, Ticker
 from .history import MarketHistory
 
 
@@ -108,6 +108,21 @@ class Portfolio:
             )
             for ticker, holdings in self.holdings_by_ticker().items()
         }
+
+    def dividend_payouts(
+        self, dividends: dict[Ticker, list[Dividend]]
+    ) -> dict[Ticker, float]:
+        holdings_by_ticker = self.holdings_by_ticker()
+        payouts: dict[Ticker, float] = {}
+
+        for ticker, ticker_dividends in dividends.items():
+            quantity = sum(
+                holding.quantity for holding in holdings_by_ticker.get(ticker, [])
+            )
+            payout = sum(quantity * dividend.adjusted_amount for dividend in ticker_dividends)
+            payouts[ticker] = payout
+
+        return payouts
 
     def sell(
         self,

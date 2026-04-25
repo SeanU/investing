@@ -23,6 +23,16 @@ class Strategy(ABC):
     ) -> Portfolio:
         raise NotImplementedError()
 
+    @abstractmethod
+    def reinvest_dividends(
+        self,
+        portfolio: Portfolio,
+        history: MarketHistory,
+        current_date: date,
+        payouts: dict[Ticker, float],
+    ) -> Portfolio:
+        raise NotImplementedError()
+
 
 class BuyAndHold(Strategy):
     def __init__(self, target_allocation: AssetAllocation):
@@ -34,7 +44,21 @@ class BuyAndHold(Strategy):
     def reblance(
         self, portfolio: Portfolio, history: MarketHistory, current_date: date
     ) -> Portfolio:
-        return Portfolio
+        return portfolio
+
+    def reinvest_dividends(
+        self,
+        portfolio: Portfolio,
+        history: MarketHistory,
+        current_date: date,
+        payouts: dict[Ticker, float],
+    ) -> Portfolio:
+        reinvested = portfolio
+        for ticker, amount in payouts.items():
+            if amount > 0:
+                reinvested = reinvested.buy(ticker, amount, current_date, history)
+
+        return reinvested
 
 
 class AnnualRebalance(Strategy):
@@ -169,6 +193,20 @@ class AnnualRebalance(Strategy):
         portfolio = self._distribute_underallocations(portfolio, history, current_date)
         return portfolio
 
+    def reinvest_dividends(
+        self,
+        portfolio: Portfolio,
+        history: MarketHistory,
+        current_date: date,
+        payouts: dict[Ticker, float],
+    ) -> Portfolio:
+        reinvested = portfolio
+        for ticker, amount in payouts.items():
+            if amount > 0:
+                reinvested = reinvested.buy(ticker, amount, current_date, history)
+
+        return reinvested
+
 
 def _make_starting_portfolio(
     history: MarketHistory,
@@ -217,12 +255,25 @@ def simulate(
     current_date = start_date
     next_rebalance = strategy.next_rebalance(start_date)
     while current_date < history.end_date:
+        previous_date = current_date
         current_date = time_step(current_date)
+        previous_portfolio = portfolio_log[-1]
+        new_portfolio = previous_portfolio
+        dividends_by_payment_date = history.get_dividends_by_payment_date(
+            previous_date, current_date
+        )
+        for payment_date in sorted(dividends_by_payment_date):
+            dividends = dividends_by_payment_date[payment_date]
+            payouts = new_portfolio.dividend_payouts(dividends)
+            new_portfolio = strategy.reinvest_dividends(
+                new_portfolio, history, payment_date, payouts
+            )
 
         if current_date >= next_rebalance:
-            rebalanced = strategy.reblance(portfolio_log[-1], history, current_date)
-            if rebalanced.as_of_date == current_date:
-                portfolio_log.append(rebalanced)
+            new_portfolio = strategy.reblance(new_portfolio, history, current_date)
             next_rebalance = strategy.next_rebalance(next_rebalance)
+
+        if new_portfolio != previous_portfolio:
+            portfolio_log.append(new_portfolio)
 
     return portfolio_log

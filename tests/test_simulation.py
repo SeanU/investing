@@ -9,6 +9,7 @@ from investing.history import load_market_history
 from investing.portfolio import AssetAllocation, HoldingTarget
 from investing.simulation import (
     AnnualRebalance,
+    BuyAndHold,
     Strategy,
     monthly_time_step,
     simulate,
@@ -118,6 +119,15 @@ class _NeverTradeStrategy(Strategy):
     def reblance(self, portfolio: p.Portfolio, history: h.MarketHistory, current_date: date):
         return portfolio
 
+    def reinvest_dividends(
+        self,
+        portfolio: p.Portfolio,
+        history: h.MarketHistory,
+        current_date: date,
+        payouts: dict[d.Ticker, float],
+    ):
+        return portfolio
+
 
 def test_simulate_keeps_single_snapshot_when_no_trades_are_made():
     """Given: strategy that never trades.
@@ -151,3 +161,208 @@ def test_simulate_keeps_single_snapshot_when_no_trades_are_made():
 
     assert len(portfolios) == 1
     assert portfolios[0].as_of_date == date(2026, 1, 1)
+
+
+def test_simulate_applies_dividends_on_payment_date():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2026, 2, 1), 10.0),
+                ],
+                [
+                    d.Dividend(
+                        amount=1.0,
+                        adjusted_amount=1.0,
+                        ex_date=date(2026, 1, 15),
+                        payment_date=date(2026, 2, 1),
+                    )
+                ],
+            )
+        }
+    )
+    strategy = BuyAndHold(AssetAllocation([HoldingTarget("A", 1)]))
+    portfolios = simulate(
+        market_history,
+        date(2026, 1, 1),
+        100.0,
+        strategy,
+        monthly_time_step,
+    )
+
+    assert len(portfolios) == 2
+    assert portfolios[-1].as_of_date == date(2026, 2, 1)
+    total_quantity = sum(
+        holding.quantity for holding in portfolios[-1].holdings if holding.ticker == "A"
+    )
+    assert total_quantity == pytest.approx(11.0)
+    assert portfolios[-1].trades[-1].kind == "buy"
+    assert portfolios[-1].trades[-1].ticker == "A"
+    assert portfolios[-1].trades[-1].quantity == pytest.approx(1.0)
+
+
+def test_simulate_does_not_apply_dividends_before_payment_date():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2026, 2, 1), 10.0),
+                ],
+                [
+                    d.Dividend(
+                        amount=1.0,
+                        adjusted_amount=1.0,
+                        ex_date=date(2026, 1, 10),
+                        payment_date=date(2026, 3, 1),
+                    )
+                ],
+            )
+        }
+    )
+    strategy = _NeverTradeStrategy(AssetAllocation([HoldingTarget("A", 1)]))
+    portfolios = simulate(
+        market_history,
+        date(2026, 1, 1),
+        100.0,
+        strategy,
+        monthly_time_step,
+    )
+
+    assert len(portfolios) == 1
+    assert portfolios[0].holdings[0].quantity == pytest.approx(10.0)
+
+
+def test_dividend_reinvestment_happens_before_rebalance():
+    class _AlwaysRebalanceWithAToB(Strategy):
+        def next_rebalance(self, current_date: date) -> date:
+            return current_date
+
+        def reinvest_dividends(
+            self,
+            portfolio: p.Portfolio,
+            history: h.MarketHistory,
+            current_date: date,
+            payouts: dict[d.Ticker, float],
+        ) -> p.Portfolio:
+            reinvested = portfolio
+            for ticker, amount in payouts.items():
+                if amount > 0:
+                    reinvested = reinvested.buy(ticker, amount, current_date, history)
+            return reinvested
+
+        def reblance(
+            self, portfolio: p.Portfolio, history: h.MarketHistory, current_date: date
+        ) -> p.Portfolio:
+            value_by_ticker = portfolio.value_by_ticker(current_date, history)
+            if value_by_ticker["A"] > value_by_ticker["B"]:
+                return portfolio.trade(
+                    sell_ticker="A",
+                    buy_ticker="B",
+                    amount=5.0,
+                    trade_date=current_date,
+                    prices=history,
+                )
+            return portfolio
+
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2026, 2, 1), 10.0),
+                ],
+                [
+                    d.Dividend(
+                        amount=0.5,
+                        adjusted_amount=0.5,
+                        ex_date=date(2026, 1, 15),
+                        payment_date=date(2026, 2, 1),
+                    )
+                ],
+            ),
+            "B": h.SecurityHistory(
+                "B",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2026, 2, 1), 10.0),
+                ],
+                [],
+            ),
+        }
+    )
+    strategy = _AlwaysRebalanceWithAToB(
+        AssetAllocation([HoldingTarget("A", 1), HoldingTarget("B", 1)])
+    )
+    portfolios = simulate(
+        market_history,
+        date(2026, 1, 1),
+        100.0,
+        strategy,
+        monthly_time_step,
+    )
+
+    assert len(portfolios) == 2
+    final_portfolio = portfolios[-1]
+    assert final_portfolio.as_of_date == date(2026, 2, 1)
+    assert final_portfolio.trades[0].kind == "buy"
+    assert final_portfolio.trades[0].ticker == "A"
+    assert final_portfolio.trades[0].quantity == pytest.approx(0.25)
+    assert final_portfolio.trades[1].kind == "sell"
+    assert final_portfolio.trades[1].ticker == "A"
+    assert final_portfolio.trades[2].kind == "buy"
+    assert final_portfolio.trades[2].ticker == "B"
+
+
+def test_simulate_processes_each_payment_date_without_lumping():
+    def quarterly_time_step(_: date) -> date:
+        return date(2026, 4, 1)
+
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2026, 2, 1), 10.0),
+                    d.Price(date(2026, 3, 1), 10.0),
+                    d.Price(date(2026, 4, 1), 20.0),
+                ],
+                [
+                    d.Dividend(
+                        amount=1.0,
+                        adjusted_amount=1.0,
+                        ex_date=date(2026, 1, 15),
+                        payment_date=date(2026, 2, 1),
+                    ),
+                    d.Dividend(
+                        amount=1.0,
+                        adjusted_amount=1.0,
+                        ex_date=date(2026, 2, 15),
+                        payment_date=date(2026, 3, 1),
+                    ),
+                ],
+            )
+        }
+    )
+    strategy = BuyAndHold(AssetAllocation([HoldingTarget("A", 1)]))
+    portfolios = simulate(
+        market_history,
+        date(2026, 1, 1),
+        100.0,
+        strategy,
+        quarterly_time_step,
+    )
+
+    assert len(portfolios) == 2
+    final_portfolio = portfolios[-1]
+    assert final_portfolio.as_of_date == date(2026, 3, 1)
+    assert len(final_portfolio.trades) == 2
+    assert final_portfolio.trades[0].trade_date == date(2026, 2, 1)
+    assert final_portfolio.trades[1].trade_date == date(2026, 3, 1)
+    assert final_portfolio.trades[0].quantity == pytest.approx(1.0)
+    assert final_portfolio.trades[1].quantity == pytest.approx(1.1)
