@@ -12,16 +12,10 @@ class Holding:
     purchase_date: date
     purchase_price: float
     quantity: float
-    current_date: date
-    current_price: float
 
     @property
     def basis(self) -> float:
         return self.purchase_price * self.quantity
-
-    @property
-    def current_value(self) -> float:
-        return self.current_price * self.quantity
 
 
 @dataclass
@@ -62,8 +56,6 @@ def sell(
             holding.purchase_date,
             holding.purchase_price,
             holding.quantity - quantity,
-            holding.current_date,
-            holding.current_price,
         )
 
     return (
@@ -77,7 +69,7 @@ def buy(
 ) -> tuple[Holding, Trade]:
 
     return (
-        Holding(ticker, trade_date, price, quantity, trade_date, price),
+        Holding(ticker, trade_date, price, quantity),
         Trade("buy", ticker, None, trade_date, price, quantity),
     )
 
@@ -88,11 +80,13 @@ class Portfolio:
     holdings: list[Holding]
     trades: list[Trade] = field(default_factory=list)
 
-    @property
-    def total_value(self) -> float:
-        """Get value for whole portlfolio."""
+    def total_value(self, as_of_date: date, prices: MarketHistory) -> float:
+        """Get value for whole portfolio."""
 
-        return sum(holding.current_value for holding in self.holdings)
+        return sum(
+            holding.quantity * prices.get_price(holding.ticker, as_of_date)
+            for holding in self.holdings
+        )
 
     def holdings_by_ticker(self) -> dict[Ticker, list[Holding]]:
         tickers = {holding.ticker for holding in self.holdings}
@@ -102,11 +96,16 @@ class Portfolio:
             for ticker in tickers
         }
 
-    def value_by_ticker(self) -> dict[Ticker, float]:
+    def value_by_ticker(
+        self, as_of_date: date, prices: MarketHistory
+    ) -> dict[Ticker, float]:
         """Get total position value by ticker."""
 
         return {
-            ticker: sum(holding.current_value for holding in holdings)
+            ticker: sum(
+                holding.quantity * prices.get_price(holding.ticker, as_of_date)
+                for holding in holdings
+            )
             for ticker, holdings in self.holdings_by_ticker().items()
         }
 

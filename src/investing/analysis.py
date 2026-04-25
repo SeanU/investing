@@ -1,10 +1,11 @@
 from datetime import date
 import polars as pl
 
+from investing.history import MarketHistory
 from investing.portfolio import Portfolio
 
 
-def position_history(portfolios: list[Portfolio]) -> pl.DataFrame:
+def position_history(portfolios: list[Portfolio], history: MarketHistory) -> pl.DataFrame:
     # Take only last portfolio version for each date
     # This is to account for multiple portfolio versions
     # on rebalancing days.
@@ -22,7 +23,7 @@ def position_history(portfolios: list[Portfolio]) -> pl.DataFrame:
             "date": portfolio.as_of_date,
             "ticker": holding.ticker,
             "quantity": holding.quantity,
-            "price": holding.current_price,
+            "price": history.get_price(holding.ticker, portfolio.as_of_date),
         }
         for portfolio in filtered
         for holding in portfolio.holdings
@@ -38,8 +39,8 @@ def position_history(portfolios: list[Portfolio]) -> pl.DataFrame:
     )
 
 
-def value_history(portfolios: list[Portfolio]) -> pl.DataFrame:
-    positions = position_history(portfolios)
+def value_history(portfolios: list[Portfolio], history: MarketHistory) -> pl.DataFrame:
+    positions = position_history(portfolios, history)
     return pl.concat(
         [
             positions.select("date", "ticker", "valuation"),

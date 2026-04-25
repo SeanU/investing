@@ -55,7 +55,7 @@ class AnnualRebalance(Strategy):
         history: MarketHistory,
         current_date: date,
     ) -> Portfolio:
-        sell_amount = portfolio.total_value * overallocation
+        sell_amount = portfolio.total_value(current_date, history) * overallocation
 
         undervalued_holdings = {
             ticker: self.allocation.proportions[ticker] - proportion
@@ -72,8 +72,8 @@ class AnnualRebalance(Strategy):
                 buy_ticker, buy_amount, current_date, history
             )
 
-        value_before = portfolio.total_value
-        value_after = new_portfolio.total_value
+        value_before = portfolio.total_value(current_date, history)
+        value_after = new_portfolio.total_value(current_date, history)
         assert value_before == value_after
 
         return new_portfolio
@@ -87,7 +87,7 @@ class AnnualRebalance(Strategy):
         history: MarketHistory,
         current_date: date,
     ) -> Portfolio:
-        buy_amount = portfolio.total_value * underallocation
+        buy_amount = portfolio.total_value(current_date, history) * underallocation
 
         overvalued_holdings = {
             ticker: proportion - self.allocation.proportions[ticker]
@@ -106,8 +106,8 @@ class AnnualRebalance(Strategy):
 
         new_portfolio = portfolio.buy(ticker, buy_amount, current_date, history)
 
-        value_before = portfolio.total_value
-        value_after = new_portfolio.total_value
+        value_before = portfolio.total_value(current_date, history)
+        value_after = new_portfolio.total_value(current_date, history)
         assert value_before == value_after
 
         return new_portfolio
@@ -116,8 +116,8 @@ class AnnualRebalance(Strategy):
         self, portfolio: Portfolio, history: MarketHistory, current_date: date
     ) -> Portfolio:
         value_proportions = {
-            ticker: value / portfolio.total_value
-            for ticker, value in portfolio.value_by_ticker().items()
+            ticker: value / portfolio.total_value(current_date, history)
+            for ticker, value in portfolio.value_by_ticker(current_date, history).items()
         }
         for ticker, proportion in value_proportions.items():
             overallocation = proportion - self.allocation.proportions[ticker]
@@ -141,8 +141,8 @@ class AnnualRebalance(Strategy):
         self, portfolio: Portfolio, history: MarketHistory, current_date: date
     ) -> Portfolio:
         value_proportions = {
-            ticker: value / portfolio.total_value
-            for ticker, value in portfolio.value_by_ticker().items()
+            ticker: value / portfolio.total_value(current_date, history)
+            for ticker, value in portfolio.value_by_ticker(current_date, history).items()
         }
         for ticker, proportion in value_proportions.items():
             underallocation = self.allocation.proportions[ticker] - proportion
@@ -179,7 +179,7 @@ def _make_starting_portfolio(
     def _make_holding(ticker: Ticker, proportion: float) -> Holding:
         value = start_funds * proportion
         price = history.get_price(ticker, start_date)
-        return Holding(ticker, start_date, price, value / price, start_date, price)
+        return Holding(ticker, start_date, price, value / price)
 
     return Portfolio(
         start_date,
@@ -191,23 +191,8 @@ def _make_starting_portfolio(
     )
 
 
-def _update_portfolio(
-    portfolio: Portfolio, current_date: date, history: MarketHistory
-) -> Portfolio:
-    def _update_holding_prices() -> list[Holding]:
-        return [
-            Holding(
-                holding.ticker,
-                holding.purchase_date,
-                holding.purchase_price,
-                holding.quantity,
-                current_date,
-                history.get_price(holding.ticker, current_date),
-            )
-            for holding in portfolio.holdings
-        ]
-
-    return Portfolio(current_date, _update_holding_prices(), portfolio.trades)
+def _update_portfolio_date(portfolio: Portfolio, current_date: date) -> Portfolio:
+    return Portfolio(current_date, portfolio.holdings, portfolio.trades)
 
 
 def monthly_time_step(current_date: date) -> date:
@@ -237,9 +222,7 @@ def simulate(
     next_rebalance = strategy.next_rebalance(start_date)
     while current_date < history.end_date:
         current_date = time_step(current_date)
-        portfolio_log.append(
-            _update_portfolio(portfolio_log[-1], current_date, history)
-        )
+        portfolio_log.append(_update_portfolio_date(portfolio_log[-1], current_date))
 
         if current_date >= next_rebalance:
             portfolio_log.append(

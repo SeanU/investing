@@ -50,8 +50,8 @@ def test_sell_reduces_oldest_lots_first_when_amount_spans_multiple_lots():
     portfolio = p.Portfolio(
         date(2026, 1, 3),
         [
-            p.Holding("A", date(2026, 1, 1), 10.0, 10.0, date(2026, 1, 3), 12.0),
-            p.Holding("A", date(2026, 1, 2), 11.0, 8.0, date(2026, 1, 3), 12.0),
+            p.Holding("A", date(2026, 1, 1), 10.0, 10.0),
+            p.Holding("A", date(2026, 1, 2), 11.0, 8.0),
         ],
     )
 
@@ -74,7 +74,7 @@ def test_sell_reduces_oldest_lots_first_when_amount_spans_multiple_lots():
     assert sell_trades[0].quantity == pytest.approx(10.0)
     assert sell_trades[1].quantity == pytest.approx(2.0)
 
-    values = new_portfolio.value_by_ticker()
+    values = new_portfolio.value_by_ticker(date(2026, 1, 3), history)
     assert values["A"] == pytest.approx(72.0)
 
 
@@ -96,8 +96,8 @@ def test_sell_exact_lot_amount_removes_lot_without_remainder():
     portfolio = p.Portfolio(
         date(2026, 1, 3),
         [
-            p.Holding("A", date(2026, 1, 1), 10.0, 10.0, date(2026, 1, 3), 12.0),
-            p.Holding("A", date(2026, 1, 2), 11.0, 8.0, date(2026, 1, 3), 12.0),
+            p.Holding("A", date(2026, 1, 1), 10.0, 10.0),
+            p.Holding("A", date(2026, 1, 2), 11.0, 8.0),
         ],
     )
 
@@ -139,7 +139,7 @@ def test_buy_creates_new_lot_at_trade_date_and_price():
     history = _market_history_for_a_and_b()
     portfolio = p.Portfolio(
         date(2026, 1, 2),
-        [p.Holding("A", date(2026, 1, 1), 10.0, 10.0, date(2026, 1, 2), 11.0)],
+        [p.Holding("A", date(2026, 1, 1), 10.0, 10.0)],
     )
 
     new_portfolio = portfolio.buy(
@@ -178,13 +178,13 @@ def test_trade_preserves_total_value_for_equal_sell_and_buy_amount():
     portfolio = p.Portfolio(
         date(2026, 1, 3),
         [
-            p.Holding("A", date(2026, 1, 1), 10.0, 10.0, date(2026, 1, 3), 12.0),
-            p.Holding("B", date(2026, 1, 1), 20.0, 5.0, date(2026, 1, 3), 22.0),
+            p.Holding("A", date(2026, 1, 1), 10.0, 10.0),
+            p.Holding("B", date(2026, 1, 1), 20.0, 5.0),
         ],
     )
 
-    pre_values = portfolio.value_by_ticker()
-    pre_total = portfolio.total_value
+    pre_values = portfolio.value_by_ticker(date(2026, 1, 3), history)
+    pre_total = portfolio.total_value(date(2026, 1, 3), history)
 
     new_portfolio = portfolio.trade(
         sell_ticker="A",
@@ -194,8 +194,8 @@ def test_trade_preserves_total_value_for_equal_sell_and_buy_amount():
         prices=history,
     )
 
-    post_values = new_portfolio.value_by_ticker()
-    post_total = new_portfolio.total_value
+    post_values = new_portfolio.value_by_ticker(date(2026, 1, 3), history)
+    post_total = new_portfolio.total_value(date(2026, 1, 3), history)
 
     assert post_total == pytest.approx(pre_total)
     assert post_values["A"] == pytest.approx(pre_values["A"] - 66.0)
@@ -214,55 +214,70 @@ def test_holdings_by_ticker_groups_multiple_lots_under_same_symbol():
       - Group counts: len(A)=2, len(B)=2
       - Aggregated values: A=40.0, B=120.0
     """
+    history = _market_history_for_a_and_b()
     portfolio = p.Portfolio(
         date(2026, 1, 3),
         [
-            p.Holding("A", date(2026, 1, 1), 10.0, 1.0, date(2026, 1, 3), 10.0),
-            p.Holding("B", date(2026, 1, 1), 20.0, 2.0, date(2026, 1, 3), 20.0),
-            p.Holding("A", date(2026, 1, 2), 10.0, 3.0, date(2026, 1, 3), 10.0),
-            p.Holding("B", date(2026, 1, 2), 20.0, 4.0, date(2026, 1, 3), 20.0),
+            p.Holding("A", date(2026, 1, 1), 10.0, 1.0),
+            p.Holding("B", date(2026, 1, 1), 20.0, 2.0),
+            p.Holding("A", date(2026, 1, 2), 10.0, 3.0),
+            p.Holding("B", date(2026, 1, 2), 20.0, 4.0),
         ],
     )
 
     grouped = portfolio.holdings_by_ticker()
-    values = portfolio.value_by_ticker()
+    values = portfolio.value_by_ticker(date(2026, 1, 3), history)
 
     assert set(grouped.keys()) == {"A", "B"}
     assert len(grouped["A"]) == 2
     assert len(grouped["B"]) == 2
-    assert values["A"] == pytest.approx(40.0)
-    assert values["B"] == pytest.approx(120.0)
+    assert values["A"] == pytest.approx(48.0)
+    assert values["B"] == pytest.approx(132.0)
 
 
 def test__total_value():
+    history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory("A", [d.Price(date.today(), 1)], []),
+            "B": h.SecurityHistory("B", [d.Price(date.today(), 2)], []),
+            "C": h.SecurityHistory("C", [d.Price(date.today(), 3)], []),
+            "D": h.SecurityHistory("D", [d.Price(date.today(), 4)], []),
+        }
+    )
     portfolio = p.Portfolio(
         date.today(),
         [
-            p.Holding("A", date.today(), 1, 1, date.today(), 1),
-            p.Holding("B", date.today(), 2, 2, date.today(), 2),
-            p.Holding("C", date.today(), 3, 3, date.today(), 3),
-            p.Holding("D", date.today(), 4, 4, date.today(), 4),
+            p.Holding("A", date.today(), 1, 1),
+            p.Holding("B", date.today(), 2, 2),
+            p.Holding("C", date.today(), 3, 3),
+            p.Holding("D", date.today(), 4, 4),
         ],
     )
 
-    assert portfolio.total_value == 1 + 4 + 9 + 16
+    assert portfolio.total_value(date.today(), history) == 1 + 4 + 9 + 16
 
 
 def test__value_by_ticker():
+    history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory("A", [d.Price(date.today(), 1)], []),
+            "B": h.SecurityHistory("B", [d.Price(date.today(), 2)], []),
+        }
+    )
     portfolio = p.Portfolio(
         date.today(),
         [
-            p.Holding("A", date.today(), 1, 1, date.today(), 1),
-            p.Holding("B", date.today(), 2, 2, date.today(), 2),
-            p.Holding("A", date.today(), 3, 3, date.today(), 3),
-            p.Holding("B", date.today(), 4, 4, date.today(), 4),
+            p.Holding("A", date.today(), 1, 1),
+            p.Holding("B", date.today(), 2, 2),
+            p.Holding("A", date.today(), 3, 3),
+            p.Holding("B", date.today(), 4, 4),
         ],
     )
 
-    values = portfolio.value_by_ticker()
+    values = portfolio.value_by_ticker(date.today(), history)
 
-    assert values["A"] == 1 + 9
-    assert values["B"] == 4 + 16
+    assert values["A"] == 4
+    assert values["B"] == 12
 
 
 def test__trade():
@@ -293,10 +308,10 @@ def test__trade():
     portfolio = p.Portfolio(
         date.today(),
         [
-            p.Holding("A", date(2026, 1, 1), 1.0, 10, date(2026, 1, 1), 1.0),
-            p.Holding("A", date(2026, 1, 2), 1.5, 10, date(2026, 1, 2), 1.5),
-            p.Holding("B", date(2026, 1, 1), 2.0, 10, date(2026, 1, 1), 2.0),
-            p.Holding("B", date(2026, 1, 2), 2.25, 10, date(2026, 1, 2), 2.25),
+            p.Holding("A", date(2026, 1, 1), 1.0, 10),
+            p.Holding("A", date(2026, 1, 2), 1.5, 10),
+            p.Holding("B", date(2026, 1, 1), 2.0, 10),
+            p.Holding("B", date(2026, 1, 2), 2.25, 10),
         ],
     )
 
@@ -308,9 +323,9 @@ def test__trade():
         prices=history,
     )
 
-    values = new_portfolio.value_by_ticker()
-    assert values["A"] == 13.5
-    assert values["B"] == 64.5
+    values = new_portfolio.value_by_ticker(date(2026, 1, 3), history)
+    assert values["A"] == 18.0
+    assert values["B"] == 72.0
 
     holdings = new_portfolio.holdings_by_ticker()
     assert len(holdings["A"]) == 1
