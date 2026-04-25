@@ -76,9 +76,7 @@ def _reporting_portfolios(
         if current_snapshot is None:
             continue
 
-        expanded.append(
-            Portfolio(report_date, current_snapshot.holdings, current_snapshot.trades)
-        )
+        expanded.append(Portfolio(report_date, current_snapshot.holdings))
 
     return expanded
 

@@ -78,7 +78,6 @@ def buy(
 class Portfolio:
     as_of_date: date
     holdings: list[Holding]
-    trades: list[Trade] = field(default_factory=list)
 
     def total_value(self, as_of_date: date, prices: MarketHistory) -> float:
         """Get value for whole portfolio."""
@@ -130,7 +129,7 @@ class Portfolio:
         amount: float,
         trade_date: date,
         prices: MarketHistory,
-    ) -> Portfolio:
+    ) -> PortfolioTransition:
         sell_price = prices.get_price(ticker, trade_date)
         sell_quantity = amount / sell_price
         current_holdings = [
@@ -157,7 +156,7 @@ class Portfolio:
                 if remainder:
                     remaining_holdings.append(remainder)
 
-        return Portfolio(trade_date, remaining_holdings, self.trades + new_trades)
+        return PortfolioTransition(Portfolio(trade_date, remaining_holdings), new_trades)
 
     def buy(
         self,
@@ -165,12 +164,12 @@ class Portfolio:
         amount: float,
         trade_date: date,
         prices: MarketHistory,
-    ) -> Portfolio:
+    ) -> PortfolioTransition:
         buy_price = prices.get_price(ticker, trade_date)
         buy_quantity = amount / buy_price
         new_holding, new_trade = buy(ticker, buy_price, buy_quantity, trade_date)
-        return Portfolio(
-            trade_date, self.holdings + [new_holding], self.trades + [new_trade]
+        return PortfolioTransition(
+            Portfolio(trade_date, self.holdings + [new_holding]), [new_trade]
         )
 
     def trade(
@@ -181,7 +180,17 @@ class Portfolio:
         amount: float,
         trade_date: date,
         prices: MarketHistory,
-    ) -> Portfolio:
-        return self.sell(sell_ticker, amount, trade_date, prices).buy(
+    ) -> PortfolioTransition:
+        sell_transition = self.sell(sell_ticker, amount, trade_date, prices)
+        buy_transition = sell_transition.portfolio.buy(
             buy_ticker, amount, trade_date, prices
         )
+        return PortfolioTransition(
+            buy_transition.portfolio, sell_transition.trades + buy_transition.trades
+        )
+
+
+@dataclass
+class PortfolioTransition:
+    portfolio: Portfolio
+    trades: list[Trade] = field(default_factory=list)

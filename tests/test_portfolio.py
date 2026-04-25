@@ -55,12 +55,13 @@ def test_sell_reduces_oldest_lots_first_when_amount_spans_multiple_lots():
         ],
     )
 
-    new_portfolio = portfolio.sell(
+    transition = portfolio.sell(
         ticker="A",
         amount=144.0,
         trade_date=date(2026, 1, 3),
         prices=history,
     )
+    new_portfolio = transition.portfolio
 
     holdings_by_ticker = new_portfolio.holdings_by_ticker()
     assert set(holdings_by_ticker.keys()) == {"A"}
@@ -69,7 +70,7 @@ def test_sell_reduces_oldest_lots_first_when_amount_spans_multiple_lots():
     assert remaining_lot.purchase_date == date(2026, 1, 2)
     assert remaining_lot.quantity == pytest.approx(6.0)
 
-    sell_trades = [t for t in new_portfolio.trades if t.kind == "sell" and t.ticker == "A"]
+    sell_trades = [t for t in transition.trades if t.kind == "sell" and t.ticker == "A"]
     assert len(sell_trades) == 2
     assert sell_trades[0].quantity == pytest.approx(10.0)
     assert sell_trades[1].quantity == pytest.approx(2.0)
@@ -101,12 +102,13 @@ def test_sell_exact_lot_amount_removes_lot_without_remainder():
         ],
     )
 
-    new_portfolio = portfolio.sell(
+    transition = portfolio.sell(
         ticker="A",
         amount=120.0,
         trade_date=date(2026, 1, 3),
         prices=history,
     )
+    new_portfolio = transition.portfolio
 
     holdings_by_ticker = new_portfolio.holdings_by_ticker()
     assert set(holdings_by_ticker.keys()) == {"A"}
@@ -115,7 +117,7 @@ def test_sell_exact_lot_amount_removes_lot_without_remainder():
     assert remaining_lot.purchase_date == date(2026, 1, 2)
     assert remaining_lot.quantity == pytest.approx(8.0)
 
-    sell_trades = [t for t in new_portfolio.trades if t.kind == "sell" and t.ticker == "A"]
+    sell_trades = [t for t in transition.trades if t.kind == "sell" and t.ticker == "A"]
     assert len(sell_trades) == 1
     assert sell_trades[0].quantity == pytest.approx(10.0)
 
@@ -142,12 +144,13 @@ def test_buy_creates_new_lot_at_trade_date_and_price():
         [p.Holding("A", date(2026, 1, 1), 10.0, 10.0)],
     )
 
-    new_portfolio = portfolio.buy(
+    transition = portfolio.buy(
         ticker="B",
         amount=44.0,
         trade_date=date(2026, 1, 3),
         prices=history,
     )
+    new_portfolio = transition.portfolio
 
     b_lots = [holding for holding in new_portfolio.holdings if holding.ticker == "B"]
     assert len(b_lots) == 1
@@ -156,7 +159,7 @@ def test_buy_creates_new_lot_at_trade_date_and_price():
     assert new_lot.purchase_price == pytest.approx(22.0)
     assert new_lot.quantity == pytest.approx(2.0)
 
-    buy_trades = [t for t in new_portfolio.trades if t.kind == "buy" and t.ticker == "B"]
+    buy_trades = [t for t in transition.trades if t.kind == "buy" and t.ticker == "B"]
     assert len(buy_trades) == 1
 
 
@@ -186,13 +189,14 @@ def test_trade_preserves_total_value_for_equal_sell_and_buy_amount():
     pre_values = portfolio.value_by_ticker(date(2026, 1, 3), history)
     pre_total = portfolio.total_value(date(2026, 1, 3), history)
 
-    new_portfolio = portfolio.trade(
+    transition = portfolio.trade(
         sell_ticker="A",
         buy_ticker="B",
         amount=66.0,
         trade_date=date(2026, 1, 3),
         prices=history,
     )
+    new_portfolio = transition.portfolio
 
     post_values = new_portfolio.value_by_ticker(date(2026, 1, 3), history)
     post_total = new_portfolio.total_value(date(2026, 1, 3), history)
@@ -315,13 +319,14 @@ def test__trade():
         ],
     )
 
-    new_portfolio = portfolio.trade(
+    transition = portfolio.trade(
         sell_ticker="A",
         buy_ticker="B",
         amount=22,
         trade_date=date(2026, 1, 3),
         prices=history,
     )
+    new_portfolio = transition.portfolio
 
     values = new_portfolio.value_by_ticker(date(2026, 1, 3), history)
     assert values["A"] == 18.0
@@ -337,4 +342,4 @@ def test__trade():
     ].purchase_date == date(2026, 1, 3)
 
     # Sell all of oldest lot of A, oone of 2nd lot of A, buy B.
-    assert len(new_portfolio.trades) == 3
+    assert len(transition.trades) == 3

@@ -1,10 +1,17 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import date
 from typing import Callable
 
 from investing.data import Ticker
 from investing.history import MarketHistory
-from investing.portfolio import AssetAllocation, Holding, Portfolio
+from investing.portfolio import AssetAllocation, Holding, Portfolio, PortfolioTransition, Trade
+
+
+@dataclass
+class SimulationResult:
+    portfolios: list[Portfolio]
+    trades: list[Trade] 
 
 
 class Strategy(ABC):
@@ -20,7 +27,7 @@ class Strategy(ABC):
     @abstractmethod
     def reblance(
         self, portfolio: Portfolio, history: MarketHistory, current_date: date
-    ) -> Portfolio:
+    ) -> PortfolioTransition:
         raise NotImplementedError()
 
     @abstractmethod
@@ -30,7 +37,7 @@ class Strategy(ABC):
         history: MarketHistory,
         current_date: date,
         payouts: dict[Ticker, float],
-    ) -> Portfolio:
+    ) -> PortfolioTransition:
         raise NotImplementedError()
 
 
@@ -43,8 +50,8 @@ class BuyAndHold(Strategy):
 
     def reblance(
         self, portfolio: Portfolio, history: MarketHistory, current_date: date
-    ) -> Portfolio:
-        return portfolio
+    ) -> PortfolioTransition:
+        return PortfolioTransition(portfolio)
 
     def reinvest_dividends(
         self,
@@ -52,13 +59,16 @@ class BuyAndHold(Strategy):
         history: MarketHistory,
         current_date: date,
         payouts: dict[Ticker, float],
-    ) -> Portfolio:
+    ) -> PortfolioTransition:
         reinvested = portfolio
+        trades: list[Trade] = []
         for ticker, amount in payouts.items():
             if amount > 0:
-                reinvested = reinvested.buy(ticker, amount, current_date, history)
+                transition = reinvested.buy(ticker, amount, current_date, history)
+                reinvested = transition.portfolio
+                trades.extend(transition.trades)
 
-        return reinvested
+        return PortfolioTransition(reinvested, trades)
 
 
 class AnnualRebalance(Strategy):
@@ -78,7 +88,7 @@ class AnnualRebalance(Strategy):
         overallocation: float,
         history: MarketHistory,
         current_date: date,
-    ) -> Portfolio:
+    ) -> PortfolioTransition:
         sell_amount = portfolio.total_value(current_date, history) * overallocation
 
         undervalued_holdings = {
@@ -88,19 +98,23 @@ class AnnualRebalance(Strategy):
         }
         total_undervaluation = sum(undervalued_holdings.values())
 
-        new_portfolio = portfolio.sell(ticker, sell_amount, current_date, history)
+        transition = portfolio.sell(ticker, sell_amount, current_date, history)
+        new_portfolio = transition.portfolio
+        trades = transition.trades.copy()
         for buy_ticker, proportion in undervalued_holdings.items():
             undervalue_prorating = proportion / total_undervaluation
             buy_amount = undervalue_prorating * sell_amount
-            new_portfolio = new_portfolio.buy(
+            transition = new_portfolio.buy(
                 buy_ticker, buy_amount, current_date, history
             )
+            new_portfolio = transition.portfolio
+            trades.extend(transition.trades)
 
         value_before = portfolio.total_value(current_date, history)
         value_after = new_portfolio.total_value(current_date, history)
         assert value_before == value_after
 
-        return new_portfolio
+        return PortfolioTransition(new_portfolio, trades)
 
     def _redistribute_underallocation(
         self,
@@ -110,7 +124,7 @@ class AnnualRebalance(Strategy):
         underallocation: float,
         history: MarketHistory,
         current_date: date,
-    ) -> Portfolio:
+    ) -> PortfolioTransition:
         buy_amount = portfolio.total_value(current_date, history) * underallocation
 
         overvalued_holdings = {
@@ -121,24 +135,29 @@ class AnnualRebalance(Strategy):
         total_overvaluation = sum(overvalued_holdings.values())
 
         new_portfolio = portfolio
+        trades: list[Trade] = []
         for sell_ticker, proportion in overvalued_holdings.items():
             overvalue_prorating = proportion / total_overvaluation
             sell_amount = overvalue_prorating * buy_amount
-            new_portfolio = new_portfolio.sell(
+            transition = new_portfolio.sell(
                 sell_ticker, sell_amount, current_date, history
             )
+            new_portfolio = transition.portfolio
+            trades.extend(transition.trades)
 
-        new_portfolio = portfolio.buy(ticker, buy_amount, current_date, history)
+        transition = new_portfolio.buy(ticker, buy_amount, current_date, history)
+        new_portfolio = transition.portfolio
+        trades.extend(transition.trades)
 
         value_before = portfolio.total_value(current_date, history)
         value_after = new_portfolio.total_value(current_date, history)
         assert value_before == value_after
 
-        return new_portfolio
+        return PortfolioTransition(new_portfolio, trades)
 
     def _distribute_overallocations(
         self, portfolio: Portfolio, history: MarketHistory, current_date: date
-    ) -> Portfolio:
+    ) -> PortfolioTransition:
         value_proportions = {
             ticker: value / portfolio.total_value(current_date, history)
             for ticker, value in portfolio.value_by_ticker(current_date, history).items()
@@ -146,24 +165,26 @@ class AnnualRebalance(Strategy):
         for ticker, proportion in value_proportions.items():
             overallocation = proportion - self.allocation.proportions[ticker]
             if overallocation > self.max_deviation:
-                return self._distribute_overallocations(
-                    self._redistribute_overallocation(
-                        ticker,
-                        portfolio,
-                        value_proportions,
-                        overallocation,
-                        history,
-                        current_date,
-                    ),
+                redistributed = self._redistribute_overallocation(
+                    ticker,
+                    portfolio,
+                    value_proportions,
+                    overallocation,
                     history,
                     current_date,
                 )
+                downstream = self._distribute_overallocations(
+                    redistributed.portfolio, history, current_date
+                )
+                return PortfolioTransition(
+                    downstream.portfolio, redistributed.trades + downstream.trades
+                )
 
-        return portfolio
+        return PortfolioTransition(portfolio)
 
     def _distribute_underallocations(
         self, portfolio: Portfolio, history: MarketHistory, current_date: date
-    ) -> Portfolio:
+    ) -> PortfolioTransition:
         value_proportions = {
             ticker: value / portfolio.total_value(current_date, history)
             for ticker, value in portfolio.value_by_ticker(current_date, history).items()
@@ -171,27 +192,36 @@ class AnnualRebalance(Strategy):
         for ticker, proportion in value_proportions.items():
             underallocation = self.allocation.proportions[ticker] - proportion
             if underallocation > self.max_deviation:
-                return self._distribute_underallocations(
-                    self._redistribute_underallocation(
-                        ticker,
-                        portfolio,
-                        value_proportions,
-                        underallocation,
-                        history,
-                        current_date,
-                    ),
+                redistributed = self._redistribute_underallocation(
+                    ticker,
+                    portfolio,
+                    value_proportions,
+                    underallocation,
                     history,
                     current_date,
                 )
+                downstream = self._distribute_underallocations(
+                    redistributed.portfolio, history, current_date
+                )
+                return PortfolioTransition(
+                    downstream.portfolio, redistributed.trades + downstream.trades
+                )
 
-        return portfolio
+        return PortfolioTransition(portfolio)
 
     def reblance(
         self, portfolio: Portfolio, history: MarketHistory, current_date: date
-    ) -> Portfolio:
-        portfolio = self._distribute_overallocations(portfolio, history, current_date)
-        portfolio = self._distribute_underallocations(portfolio, history, current_date)
-        return portfolio
+    ) -> PortfolioTransition:
+        over_transition = self._distribute_overallocations(
+            portfolio, history, current_date
+        )
+        under_transition = self._distribute_underallocations(
+            over_transition.portfolio, history, current_date
+        )
+        return PortfolioTransition(
+            under_transition.portfolio,
+            over_transition.trades + under_transition.trades,
+        )
 
     def reinvest_dividends(
         self,
@@ -199,13 +229,16 @@ class AnnualRebalance(Strategy):
         history: MarketHistory,
         current_date: date,
         payouts: dict[Ticker, float],
-    ) -> Portfolio:
+    ) -> PortfolioTransition:
         reinvested = portfolio
+        trades: list[Trade] = []
         for ticker, amount in payouts.items():
             if amount > 0:
-                reinvested = reinvested.buy(ticker, amount, current_date, history)
+                transition = reinvested.buy(ticker, amount, current_date, history)
+                reinvested = transition.portfolio
+                trades.extend(transition.trades)
 
-        return reinvested
+        return PortfolioTransition(reinvested, trades)
 
 
 def _make_starting_portfolio(
@@ -225,7 +258,6 @@ def _make_starting_portfolio(
             _make_holding(ticker, proportion)
             for ticker, proportion in allocation.proportions.items()
         ],
-        [],
     )
 
 
@@ -246,11 +278,12 @@ def simulate(
     start_funds: float,
     strategy: Strategy,
     time_step: Callable[[date], date],
-) -> list[Portfolio]:
+) -> SimulationResult:
     starting_portfolio = _make_starting_portfolio(
         history, strategy.starting_allocation, start_date, start_funds
     )
     portfolio_log = [starting_portfolio]
+    trade_log: list[Trade] = []
 
     current_date = start_date
     next_rebalance = strategy.next_rebalance(start_date)
@@ -265,15 +298,19 @@ def simulate(
         for payment_date in sorted(dividends_by_payment_date):
             dividends = dividends_by_payment_date[payment_date]
             payouts = new_portfolio.dividend_payouts(dividends)
-            new_portfolio = strategy.reinvest_dividends(
+            transition = strategy.reinvest_dividends(
                 new_portfolio, history, payment_date, payouts
             )
+            new_portfolio = transition.portfolio
+            trade_log.extend(transition.trades)
 
         if current_date >= next_rebalance:
-            new_portfolio = strategy.reblance(new_portfolio, history, current_date)
+            transition = strategy.reblance(new_portfolio, history, current_date)
+            new_portfolio = transition.portfolio
+            trade_log.extend(transition.trades)
             next_rebalance = strategy.next_rebalance(next_rebalance)
 
         if new_portfolio != previous_portfolio:
             portfolio_log.append(new_portfolio)
 
-    return portfolio_log
+    return SimulationResult(portfolio_log, trade_log)
