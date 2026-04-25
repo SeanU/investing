@@ -8,40 +8,42 @@ from investing import history as h
 from investing import portfolio as p
 
 
-def test_position_history_keeps_only_last_portfolio_version_per_date():
-    """Given: multiple portfolio versions on same rebalancing date.
+def test_position_history_forward_fills_holdings_between_trade_dates():
+    """Given: sparse trade-date portfolio snapshots and explicit reporting dates.
 
     Example input:
-      - Two portfolio entries on 2026-01-03 (pre and post rebalance)
-      - Distinct quantities for ticker A in each version
+      - Portfolio snapshots on 2026-01-03 and 2026-01-05
+      - Reporting dates include 2026-01-04 (no trade)
 
     Expected output:
-      - position_history includes only the last 2026-01-03 version
-      - Quantity/valuation for A matches the post-rebalance portfolio
+      - 2026-01-04 valuation uses holdings from 2026-01-03 snapshot
+      - Quantity stays constant while price is marked-to-market
     """
     market_history = h.MarketHistory(
         {
             "A": h.SecurityHistory(
                 "A",
-                [d.Price(date(2026, 1, 3), 10.0), d.Price(date(2026, 1, 4), 10.0)],
+                [
+                    d.Price(date(2026, 1, 3), 10.0),
+                    d.Price(date(2026, 1, 4), 12.0),
+                    d.Price(date(2026, 1, 5), 12.0),
+                ],
                 [],
             )
         }
     )
     portfolios = [
-        p.Portfolio(date(2026, 1, 3), [p.Holding("A", date(2026, 1, 1), 9.0, 1.0)]),
         p.Portfolio(date(2026, 1, 3), [p.Holding("A", date(2026, 1, 1), 9.0, 2.0)]),
-        p.Portfolio(date(2026, 1, 4), [p.Holding("A", date(2026, 1, 1), 9.0, 3.0)]),
+        p.Portfolio(date(2026, 1, 5), [p.Holding("A", date(2026, 1, 1), 9.0, 3.0)]),
     ]
-
-    positions = a.position_history(portfolios, market_history)
-    jan3_a = positions.filter(
-        (pl.col("date") == date(2026, 1, 3)) & (pl.col("ticker") == "A")
+    positions = a.position_history(portfolios, market_history, "daily")
+    jan4_a = positions.filter(
+        (pl.col("date") == date(2026, 1, 4)) & (pl.col("ticker") == "A")
     )
 
-    assert jan3_a.height == 1
-    assert jan3_a["quantity"][0] == 2.0
-    assert jan3_a["valuation"][0] == 20.0
+    assert jan4_a.height == 1
+    assert jan4_a["quantity"][0] == 2.0
+    assert jan4_a["valuation"][0] == 24.0
 
 
 def test_position_history_aggregates_quantities_for_same_ticker_and_price():
@@ -73,7 +75,7 @@ def test_position_history_aggregates_quantities_for_same_ticker_and_price():
         )
     ]
 
-    positions = a.position_history(portfolios, market_history)
+    positions = a.position_history(portfolios, market_history, "daily")
     a_row = positions.filter(
         (pl.col("date") == date(2026, 1, 3))
         & (pl.col("ticker") == "A")
@@ -127,10 +129,40 @@ def test_value_history_adds_total_row_for_each_date():
         ),
     ]
 
-    values = a.value_history(portfolios, market_history)
+    values = a.value_history(portfolios, market_history, "daily")
     total_rows = values.filter(pl.col("ticker") == "_TOTAL").sort("date")
 
     assert total_rows.height == 2
     assert total_rows["valuation"][0] == 80.0
     assert total_rows["valuation"][1] == 87.0
     assert values.sort(["date", "ticker"]).rows() == values.rows()
+
+
+def test_position_history_includes_trade_dates_between_monthly_steps():
+    """Given: monthly reporting cadence with a mid-month trade snapshot.
+
+    Expected output:
+      - position history includes cadence dates plus in-between trade dates
+    """
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2026, 1, 15), 12.0),
+                    d.Price(date(2026, 2, 1), 11.0),
+                ],
+                [],
+            )
+        }
+    )
+    portfolios = [
+        p.Portfolio(date(2026, 1, 1), [p.Holding("A", date(2026, 1, 1), 10.0, 1.0)]),
+        p.Portfolio(date(2026, 1, 15), [p.Holding("A", date(2026, 1, 1), 10.0, 2.0)]),
+    ]
+
+    positions = a.position_history(portfolios, market_history, "monthly")
+    reported_dates = sorted(set(positions["date"].to_list()))
+
+    assert reported_dates == [date(2026, 1, 1), date(2026, 1, 15), date(2026, 2, 1)]

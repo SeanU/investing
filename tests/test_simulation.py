@@ -7,7 +7,12 @@ from investing import history as h
 from investing import portfolio as p
 from investing.history import load_market_history
 from investing.portfolio import AssetAllocation, HoldingTarget
-from investing.simulation import AnnualRebalance, monthly_time_step, simulate
+from investing.simulation import (
+    AnnualRebalance,
+    Strategy,
+    monthly_time_step,
+    simulate,
+)
 
 
 def test__smoke_test():
@@ -104,3 +109,45 @@ def test_annual_rebalance_keeps_total_value_constant_during_reallocation():
     )
     assert rebalanced_values["A"] == pytest.approx(50.0)
     assert rebalanced_values["B"] == pytest.approx(50.0)
+
+
+class _NeverTradeStrategy(Strategy):
+    def next_rebalance(self, current_date: date) -> date:
+        return current_date
+
+    def reblance(self, portfolio: p.Portfolio, history: h.MarketHistory, current_date: date):
+        return portfolio
+
+
+def test_simulate_keeps_single_snapshot_when_no_trades_are_made():
+    """Given: strategy that never trades.
+
+    Expected output:
+      - simulate returns only the starting portfolio snapshot
+      - no per-time-step portfolio clones are added
+    """
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2026, 2, 1), 11.0),
+                    d.Price(date(2026, 3, 1), 12.0),
+                ],
+                [],
+            )
+        }
+    )
+    strategy = _NeverTradeStrategy(AssetAllocation([HoldingTarget("A", 1)]))
+
+    portfolios = simulate(
+        market_history,
+        date(2026, 1, 1),
+        100.0,
+        strategy,
+        monthly_time_step,
+    )
+
+    assert len(portfolios) == 1
+    assert portfolios[0].as_of_date == date(2026, 1, 1)

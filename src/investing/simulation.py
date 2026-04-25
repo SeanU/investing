@@ -191,10 +191,6 @@ def _make_starting_portfolio(
     )
 
 
-def _update_portfolio_date(portfolio: Portfolio, current_date: date) -> Portfolio:
-    return Portfolio(current_date, portfolio.holdings, portfolio.trades)
-
-
 def monthly_time_step(current_date: date) -> date:
     next_year = current_date.year
     next_month = current_date.month + 1
@@ -222,12 +218,11 @@ def simulate(
     next_rebalance = strategy.next_rebalance(start_date)
     while current_date < history.end_date:
         current_date = time_step(current_date)
-        portfolio_log.append(_update_portfolio_date(portfolio_log[-1], current_date))
 
         if current_date >= next_rebalance:
-            portfolio_log.append(
-                strategy.reblance(portfolio_log[-1], history, current_date)
-            )
+            rebalanced = strategy.reblance(portfolio_log[-1], history, current_date)
+            if rebalanced.as_of_date == current_date:
+                portfolio_log.append(rebalanced)
             next_rebalance = strategy.next_rebalance(next_rebalance)
 
     return portfolio_log
