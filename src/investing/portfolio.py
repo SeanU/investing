@@ -185,12 +185,13 @@ class Portfolio:
         buy_transition = sell_transition.portfolio.buy(
             buy_ticker, amount, trade_date, prices
         )
-        return PortfolioTransition(
-            buy_transition.portfolio, sell_transition.trades + buy_transition.trades
-        )
+        return sell_transition.update(buy_transition)
 
 
 @dataclass
 class PortfolioTransition:
     portfolio: Portfolio
     trades: list[Trade] = field(default_factory=list)
+
+    def update(self, new_transition: PortfolioTransition) -> PortfolioTransition:
+        return PortfolioTransition(new_transition.portfolio, self.trades + new_transition.trades)
