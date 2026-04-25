@@ -24,6 +24,19 @@ class Strategy(ABC):
         raise NotImplementedError()
 
 
+class BuyAndHold(Strategy):
+    def __init__(self, target_allocation: AssetAllocation):
+        super().__init__(target_allocation)
+
+    def next_rebalance(self, current_date: date) -> date:
+        return date.max
+
+    def reblance(
+        self, portfolio: Portfolio, history: MarketHistory, current_date: date
+    ) -> Portfolio:
+        return Portfolio
+
+
 class AnnualRebalance(Strategy):
     def __init__(self, target_allocation: AssetAllocation, max_deviation: float):
         super().__init__(target_allocation)

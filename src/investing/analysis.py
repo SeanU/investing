@@ -4,7 +4,7 @@ import polars as pl
 from investing.portfolio import Portfolio
 
 
-def value_history(portfolios: list[Portfolio]) -> pl.DataFrame:
+def position_history(portfolios: list[Portfolio]) -> pl.DataFrame:
     # Take only last portfolio version for each date
     # This is to account for multiple portfolio versions
     # on rebalancing days.
@@ -29,4 +29,23 @@ def value_history(portfolios: list[Portfolio]) -> pl.DataFrame:
     ]
 
     df = pl.DataFrame(holdings)
-    return df.group_by("date", "ticker", "price").agg(pl.sum("quantity"))
+    return (
+        df.group_by("date", "ticker", "price")
+        .agg(pl.sum("quantity"))
+        .with_columns(
+            (pl.col("price") * pl.col("quantity")).round(2).alias("valuation")
+        )
+    )
+
+
+def value_history(portfolios: list[Portfolio]) -> pl.DataFrame:
+    positions = position_history(portfolios)
+    return pl.concat(
+        [
+            positions.select("date", "ticker", "valuation"),
+            positions.group_by("date")
+            .agg(pl.sum("valuation"))
+            .with_columns(pl.lit("_TOTAL").alias("ticker"))
+            .select("date", "ticker", "valuation"),
+        ]
+    ).sort(["date", "ticker"])
