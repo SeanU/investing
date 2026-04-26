@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date
-from typing import Callable
 
 from investing.data import Ticker
 from investing.history import MarketHistory
@@ -258,23 +257,11 @@ def _make_starting_portfolio(
     )
 
 
-def monthly_time_step(current_date: date) -> date:
-    next_year = current_date.year
-    next_month = current_date.month + 1
-
-    if next_month > 12:
-        next_year += 1
-        next_month = 1
-
-    return date(next_year, next_month, current_date.day)
-
-
 def simulate(
     history: MarketHistory,
     start_date: date,
     start_funds: float,
     strategy: Strategy,
-    time_step: Callable[[date], date],
     end_date: date | None = None,
 ) -> SimulationResult:
     def _apply_dividends(
@@ -339,7 +326,7 @@ def simulate(
     next_rebalance = strategy.next_rebalance(start_date)
     while current_date < simulation_end_date:
         previous_date = current_date
-        current_date = min(time_step(current_date), simulation_end_date)
+        current_date = min(next_rebalance, simulation_end_date)
         previous_portfolio = portfolio_log[-1]
         dividend_transition = _apply_dividends(
             previous_portfolio, previous_date, current_date
@@ -347,11 +334,16 @@ def simulate(
         new_portfolio = dividend_transition.portfolio
         trade_log.extend(dividend_transition.trades)
 
-        if current_date >= next_rebalance:
+        while current_date >= next_rebalance:
             transition = strategy.reblance(new_portfolio, history, current_date)
             new_portfolio = transition.portfolio
             trade_log.extend(transition.trades)
-            next_rebalance = strategy.next_rebalance(next_rebalance)
+            upcoming_rebalance = strategy.next_rebalance(next_rebalance)
+            if upcoming_rebalance <= next_rebalance:
+                raise ValueError(
+                    "strategy.next_rebalance must return a date after current_date"
+                )
+            next_rebalance = upcoming_rebalance
 
         if new_portfolio != previous_portfolio:
             portfolio_log.append(new_portfolio)

@@ -11,7 +11,6 @@ from investing.simulation import (
     AnnualRebalance,
     BuyAndHold,
     Strategy,
-    monthly_time_step,
     simulate,
 )
 
@@ -24,19 +23,7 @@ def test__smoke_test():
         ),
         0.05,
     )
-    simulate(history, date(2022, 1, 1), 100_000, strategy, monthly_time_step)
-
-
-def test_monthly_time_step_rolls_december_to_january_same_day():
-    """Given: a date in December.
-
-    Example input:
-      - current_date = 2026-12-15
-
-    Expected output:
-      - next_date = 2027-01-15
-    """
-    assert monthly_time_step(date(2026, 12, 15)) == date(2027, 1, 15)
+    simulate(history, date(2022, 1, 1), 100_000, strategy)
 
 
 def test_simulate_builds_starting_portfolio_from_target_allocation():
@@ -61,7 +48,7 @@ def test_simulate_builds_starting_portfolio_from_target_allocation():
         0.05,
     )
 
-    simulation = simulate(history, date(2022, 1, 1), 100_000, strategy, monthly_time_step)
+    simulation = simulate(history, date(2022, 1, 1), 100_000, strategy)
     starting_portfolio = simulation.portfolios[0]
     start_date = date(2022, 1, 1)
 
@@ -115,7 +102,7 @@ def test_annual_rebalance_keeps_total_value_constant_during_reallocation():
 
 class _NeverTradeStrategy(Strategy):
     def next_rebalance(self, current_date: date) -> date:
-        return current_date
+        return date.max
 
     def reblance(
         self, portfolio: p.Portfolio, history: h.MarketHistory, current_date: date
@@ -159,7 +146,6 @@ def test_simulate_keeps_start_and_end_snapshots_when_no_trades_are_made():
         date(2026, 1, 1),
         100.0,
         strategy,
-        monthly_time_step,
     )
 
     assert len(simulation.portfolios) == 2
@@ -195,7 +181,6 @@ def test_simulate_does_not_duplicate_final_snapshot_when_end_date_already_logged
         date(2026, 1, 1),
         100.0,
         strategy,
-        monthly_time_step,
     )
 
     assert len(simulation.portfolios) == 2
@@ -228,7 +213,6 @@ def test_simulate_applies_dividends_on_payment_date():
         date(2026, 1, 1),
         100.0,
         strategy,
-        monthly_time_step,
     )
 
     assert len(simulation.portfolios) == 2
@@ -277,7 +261,6 @@ def test_simulate_does_not_apply_dividends_before_payment_date():
         date(2026, 1, 1),
         100.0,
         strategy,
-        monthly_time_step,
     )
 
     assert len(simulation.portfolios) == 2
@@ -290,7 +273,10 @@ def test_simulate_does_not_apply_dividends_before_payment_date():
 def test_dividend_reinvestment_happens_before_rebalance():
     class _AlwaysRebalanceWithAToB(Strategy):
         def next_rebalance(self, current_date: date) -> date:
-            return current_date
+            first_rebalance = date(2026, 2, 1)
+            if current_date < first_rebalance:
+                return first_rebalance
+            return date.max
 
         def reinvest_dividends(
             self,
@@ -357,7 +343,6 @@ def test_dividend_reinvestment_happens_before_rebalance():
         date(2026, 1, 1),
         100.0,
         strategy,
-        monthly_time_step,
     )
 
     assert len(simulation.portfolios) == 2
@@ -373,9 +358,6 @@ def test_dividend_reinvestment_happens_before_rebalance():
 
 
 def test_simulate_processes_each_payment_date_without_lumping():
-    def quarterly_time_step(_: date) -> date:
-        return date(2026, 4, 1)
-
     market_history = h.MarketHistory(
         {
             "A": h.SecurityHistory(
@@ -409,7 +391,6 @@ def test_simulate_processes_each_payment_date_without_lumping():
         date(2026, 1, 1),
         100.0,
         strategy,
-        quarterly_time_step,
     )
 
     assert len(simulation.portfolios) == 3
@@ -459,7 +440,6 @@ def test_simulate_trade_log_contains_unique_events_without_snapshot_duplicates()
         date(2026, 1, 1),
         100.0,
         strategy,
-        monthly_time_step,
     )
 
     trade_events = [
@@ -470,9 +450,6 @@ def test_simulate_trade_log_contains_unique_events_without_snapshot_duplicates()
 
 
 def test_simulate_end_date_limits_how_long_simulation_runs():
-    def quarterly_time_step(_: date) -> date:
-        return date(2026, 4, 1)
-
     market_history = h.MarketHistory(
         {
             "A": h.SecurityHistory(
@@ -506,7 +483,6 @@ def test_simulate_end_date_limits_how_long_simulation_runs():
         date(2026, 1, 1),
         100.0,
         strategy,
-        quarterly_time_step,
         end_date=date(2026, 2, 1),
     )
 
