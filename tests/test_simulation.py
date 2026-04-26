@@ -10,6 +10,7 @@ from investing.portfolio import AssetAllocation, HoldingTarget
 from investing.simulation import (
     AnnualRebalance,
     BuyAndHold,
+    MultiStrategySimulationResult,
     Strategy,
     simulate,
     simulate_many,
@@ -627,6 +628,173 @@ def test_simulate_many_raises_for_invalid_inputs_or_window():
     with pytest.raises(ValueError, match="no valid start-date window"):
         simulate_many(
             strategy=strategy,
+            history=market_history,
+            years=1,
+            start_funds=100.0,
+            num_simulations=1,
+        )
+
+
+def test_simulate_many_supports_multiple_strategies_with_shared_dates():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2027, 1, 1), 11.0),
+                    d.Price(date(2028, 1, 1), 12.0),
+                    d.Price(date(2028, 12, 31), 13.0),
+                ],
+                [],
+            )
+        }
+    )
+    strategies = [
+        BuyAndHold(AssetAllocation([HoldingTarget("A", 1)])),
+        AnnualRebalance(AssetAllocation([HoldingTarget("A", 1)]), 0.05),
+    ]
+
+    result = simulate_many(
+        strategy=strategies,
+        history=market_history,
+        years=1,
+        start_funds=100.0,
+        num_simulations=8,
+        seed=11,
+    )
+
+    assert isinstance(result, MultiStrategySimulationResult)
+    assert set(result.by_strategy) == {"BuyAndHold", "AnnualRebalance"}
+    buy_and_hold_dates = [
+        (sim.portfolios[0].as_of_date, sim.portfolios[-1].as_of_date)
+        for sim in result.by_strategy["BuyAndHold"].simulations
+    ]
+    annual_rebalance_dates = [
+        (sim.portfolios[0].as_of_date, sim.portfolios[-1].as_of_date)
+        for sim in result.by_strategy["AnnualRebalance"].simulations
+    ]
+    assert buy_and_hold_dates == annual_rebalance_dates
+    assert len(result.by_strategy["BuyAndHold"].run_metrics) == 8
+    assert len(result.by_strategy["AnnualRebalance"].run_metrics) == 8
+
+
+def test_simulate_many_multiple_strategies_use_common_window():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2027, 1, 1), 11.0),
+                    d.Price(date(2028, 12, 31), 12.0),
+                ],
+                [],
+            ),
+            "B": h.SecurityHistory(
+                "B",
+                [
+                    d.Price(date(2026, 6, 1), 20.0),
+                    d.Price(date(2027, 6, 1), 21.0),
+                    d.Price(date(2028, 12, 31), 22.0),
+                ],
+                [],
+            ),
+        }
+    )
+    strategies = [
+        BuyAndHold(AssetAllocation([HoldingTarget("A", 1)])),
+        BuyAndHold(AssetAllocation([HoldingTarget("B", 1)])),
+    ]
+
+    result = simulate_many(
+        strategy=strategies,
+        history=market_history,
+        years=1,
+        start_funds=100.0,
+        num_simulations=12,
+        seed=5,
+    )
+
+    assert isinstance(result, MultiStrategySimulationResult)
+    earliest_start = date(2026, 6, 1)
+    latest_start = date(2027, 12, 31)
+    for strategy_result in result.by_strategy.values():
+        for simulation in strategy_result.simulations:
+            start_date = simulation.portfolios[0].as_of_date
+            end_date = simulation.portfolios[-1].as_of_date
+            assert earliest_start <= start_date <= latest_start
+            assert end_date == _expected_end_date(start_date, 1)
+
+
+def test_simulate_many_multiple_strategies_reproducible_with_seed():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2027, 1, 1), 11.0),
+                    d.Price(date(2028, 12, 31), 12.0),
+                ],
+                [],
+            )
+        }
+    )
+    strategies = [
+        BuyAndHold(AssetAllocation([HoldingTarget("A", 1)])),
+        AnnualRebalance(AssetAllocation([HoldingTarget("A", 1)]), 0.05),
+    ]
+
+    first = simulate_many(
+        strategy=strategies,
+        history=market_history,
+        years=1,
+        start_funds=100.0,
+        num_simulations=10,
+        seed=99,
+    )
+    second = simulate_many(
+        strategy=strategies,
+        history=market_history,
+        years=1,
+        start_funds=100.0,
+        num_simulations=10,
+        seed=99,
+    )
+
+    assert isinstance(first, MultiStrategySimulationResult)
+    assert isinstance(second, MultiStrategySimulationResult)
+    assert list(first.by_strategy) == list(second.by_strategy)
+    for label in first.by_strategy:
+        first_dates = [
+            sim.portfolios[0].as_of_date
+            for sim in first.by_strategy[label].simulations
+        ]
+        second_dates = [
+            sim.portfolios[0].as_of_date
+            for sim in second.by_strategy[label].simulations
+        ]
+        assert first_dates == second_dates
+
+
+def test_simulate_many_raises_for_empty_strategy_collection():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2027, 1, 1), 11.0),
+                ],
+                [],
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="at least one strategy is required"):
+        simulate_many(
+            strategy=[],
             history=market_history,
             years=1,
             start_funds=100.0,

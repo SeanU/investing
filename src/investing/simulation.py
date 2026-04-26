@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from math import isclose
@@ -36,6 +36,11 @@ class MultiSimulationResult:
     simulations: list[SimulationResult]
     run_metrics: list[SimulationMetrics]
     metrics: SimulationMetrics
+
+
+@dataclass
+class MultiStrategySimulationResult:
+    by_strategy: dict[str, MultiSimulationResult]
 
 
 class Strategy(ABC):
@@ -396,12 +401,15 @@ def _first_price_date(history: MarketHistory, ticker: Ticker) -> date:
 
 
 def _start_date_bounds(
-    history: MarketHistory, strategy: Strategy, years: int
+    history: MarketHistory, strategies: Sequence[Strategy], years: int
 ) -> tuple[date, date]:
     if years <= 0:
         raise ValueError("years must be greater than 0")
 
-    tickers = _strategy_tickers(strategy)
+    if not strategies:
+        raise ValueError("at least one strategy is required")
+
+    tickers = set().union(*(_strategy_tickers(strategy) for strategy in strategies))
     if not tickers:
         raise ValueError("strategy must include at least one ticker")
 
@@ -415,7 +423,7 @@ def _start_date_bounds(
 
 def _random_start_dates(
     history: MarketHistory,
-    strategy: Strategy,
+    strategies: Sequence[Strategy],
     years: int,
     num_simulations: int,
     rng: Random,
@@ -423,7 +431,7 @@ def _random_start_dates(
     if num_simulations <= 0:
         raise ValueError("num_simulations must be greater than 0")
 
-    earliest_start, latest_start = _start_date_bounds(history, strategy, years)
+    earliest_start, latest_start = _start_date_bounds(history, strategies, years)
     candidate_days = (latest_start - earliest_start).days + 1
     return [
         earliest_start + timedelta(days=rng.randrange(candidate_days))
@@ -431,20 +439,28 @@ def _random_start_dates(
     ]
 
 
-def simulate_many(
+def _strategy_label(
+    strategy: Strategy, index: int, existing: set[str]
+) -> str:
+    base_label = strategy.__class__.__name__
+    if base_label not in existing:
+        return base_label
+
+    suffixed = f"{base_label}_{index + 1}"
+    while suffixed in existing:
+        index += 1
+        suffixed = f"{base_label}_{index + 1}"
+    return suffixed
+
+
+def _run_simulations_for_strategy(
     strategy: Strategy,
     history: MarketHistory,
     years: int,
     start_funds: float,
-    num_simulations: int,
-    seed: int | None = None,
-    show_progress: bool = False,
+    start_dates: Sequence[date],
+    show_progress: bool,
 ) -> MultiSimulationResult:
-    """Run multiple randomized simulations for the given strategy."""
-    rng = Random(seed)
-    start_dates = _random_start_dates(
-        history, strategy, years, num_simulations, rng=rng
-    )
     simulations: list[SimulationResult] = []
     run_metrics: list[SimulationMetrics] = []
 
@@ -452,7 +468,11 @@ def simulate_many(
     if show_progress:
         from tqdm.auto import tqdm
 
-        progress_iter = tqdm(start_dates, desc="Simulations", unit="run")
+        progress_iter = tqdm(
+            start_dates,
+            desc=f"Simulations ({strategy.__class__.__name__})",
+            unit="run",
+        )
 
     for start_date in progress_iter:
         end_date = _add_years(start_date, years)
@@ -473,9 +493,61 @@ def simulate_many(
         )
 
     aggregate_metrics = aggregate_simulation_metrics(run_metrics)
-
     return MultiSimulationResult(
         simulations=simulations,
         run_metrics=run_metrics,
         metrics=aggregate_metrics,
     )
+
+
+def simulate_many(
+    strategy: Strategy | Sequence[Strategy],
+    history: MarketHistory,
+    years: int,
+    start_funds: float,
+    num_simulations: int,
+    seed: int | None = None,
+    show_progress: bool = False,
+) -> MultiSimulationResult | MultiStrategySimulationResult:
+    """Run randomized simulations for one or many strategies.
+
+    When many strategies are provided, all strategies are evaluated on the same
+    sampled start-date list.
+    """
+    strategies: list[Strategy]
+    if isinstance(strategy, Strategy):
+        strategies = [strategy]
+    else:
+        strategies = list(strategy)
+
+    if not strategies:
+        raise ValueError("at least one strategy is required")
+
+    rng = Random(seed)
+    start_dates = _random_start_dates(
+        history, strategies, years, num_simulations, rng=rng
+    )
+
+    if len(strategies) == 1:
+        return _run_simulations_for_strategy(
+            strategy=strategies[0],
+            history=history,
+            years=years,
+            start_funds=start_funds,
+            start_dates=start_dates,
+            show_progress=show_progress,
+        )
+
+    by_strategy: dict[str, MultiSimulationResult] = {}
+    for index, one_strategy in enumerate(strategies):
+        label = _strategy_label(one_strategy, index, set(by_strategy))
+        by_strategy[label] = _run_simulations_for_strategy(
+            strategy=one_strategy,
+            history=history,
+            years=years,
+            start_funds=start_funds,
+            start_dates=start_dates,
+            show_progress=show_progress,
+        )
+
+    return MultiStrategySimulationResult(by_strategy=by_strategy)
