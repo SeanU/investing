@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
+from math import isclose
 from random import Random
 
 from investing.data import Ticker
@@ -97,6 +99,16 @@ class AnnualRebalance(Strategy):
     def next_rebalance(self, current_date: date) -> date:
         return date(current_date.year + 1, current_date.month, current_date.day)
 
+    @staticmethod
+    def _assert_value_preserved(value_before: float, value_after: float) -> None:
+        # Trades should preserve value; allow tiny float arithmetic drift.
+        assert isclose(
+            value_before,
+            value_after,
+            rel_tol=1e-9,
+            abs_tol=1e-6,
+        )
+
     def _redistribute_overallocation(
         self,
         ticker: Ticker,
@@ -127,7 +139,7 @@ class AnnualRebalance(Strategy):
 
         value_before = portfolio.total_value(current_date, history)
         value_after = transition.portfolio.total_value(current_date, history)
-        assert value_before == value_after
+        self._assert_value_preserved(value_before, value_after)
 
         return transition
 
@@ -164,7 +176,7 @@ class AnnualRebalance(Strategy):
 
         value_before = portfolio.total_value(current_date, history)
         value_after = transition.portfolio.total_value(current_date, history)
-        assert value_before == value_after
+        self._assert_value_preserved(value_before, value_after)
 
         return transition
 
@@ -422,6 +434,7 @@ def simulate_many(
     start_funds: float,
     num_simulations: int,
     seed: int | None = None,
+    show_progress: bool = False,
 ) -> MultiSimulationResult:
     """Run multiple randomized simulations for the given strategy."""
     rng = Random(seed)
@@ -431,7 +444,13 @@ def simulate_many(
     simulations: list[SimulationResult] = []
     run_metrics: list[SimulationMetrics] = []
 
-    for start_date in start_dates:
+    progress_iter: Iterable[date] = start_dates
+    if show_progress:
+        from tqdm.auto import tqdm
+
+        progress_iter = tqdm(start_dates, desc="Simulations", unit="run")
+
+    for start_date in progress_iter:
         end_date = _add_years(start_date, years)
         result = simulate(
             history=history,
