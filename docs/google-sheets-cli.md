@@ -2,6 +2,10 @@
 
 This project can **create** two Google Sheets (dividends and prices) from a JSON config, populate them with [Dividend Data](https://www.dividenddata.com/) spreadsheet formulas, and **export** them to Excel (`.xlsx`) under `data/`. The layout matches what [`src/investing/data.py`](../src/investing/data.py) expects: an `Overview` sheet plus one worksheet per ticker.
 
+Related utility:
+
+- [`docs/instruments-cli.md`](./instruments-cli.md): fill missing names in `config/all_instruments.csv` using a public source.
+
 You need:
 
 - A **Google account** and a **Google Cloud** project with OAuth credentials (steps below).
