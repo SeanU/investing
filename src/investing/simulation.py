@@ -7,7 +7,11 @@ from random import Random
 
 from investing.data import Ticker
 from investing.history import MarketHistory
-from investing.metrics import SimulationMetrics, compute_simulation_metrics
+from investing.metrics import (
+    SimulationMetrics,
+    aggregate_simulation_metrics,
+    compute_simulation_metrics,
+)
 from investing.portfolio import AssetAllocation, Holding, Portfolio, PortfolioTransition, Trade
 
 
@@ -468,11 +472,7 @@ def simulate_many(
             )
         )
 
-    aggregate_metrics = compute_simulation_metrics(
-        [result.portfolios for result in simulations],
-        history,
-        start_funds=start_funds,
-    )
+    aggregate_metrics = aggregate_simulation_metrics(run_metrics)
 
     return MultiSimulationResult(
         simulations=simulations,

@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from bisect import bisect_right
+from dataclasses import dataclass, field
 from datetime import date
 
 from . import data
@@ -18,16 +19,32 @@ class SecurityHistory:
 @dataclass
 class MarketHistory:
     securities: dict[data.Ticker, SecurityHistory]
+    _price_index: dict[data.Ticker, tuple[list[date], list[float]]] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     @property
     def end_date(self) -> date:
         return max(history.end_date for history in self.securities.values())
 
+    def _price_lookup(self, ticker: data.Ticker) -> tuple[list[date], list[float]]:
+        cached = self._price_index.get(ticker)
+        if cached is not None:
+            return cached
+
+        sorted_prices = sorted(self.securities[ticker].prices, key=lambda p: p.date)
+        dates = [price.date for price in sorted_prices]
+        values = [price.price for price in sorted_prices]
+        lookup = (dates, values)
+        self._price_index[ticker] = lookup
+        return lookup
+
     def get_price(self, ticker: data.Ticker, as_of: date) -> float:
-        prices = self.securities[ticker].prices
-        prices = [price for price in prices if price.date <= as_of]
-        prices.sort(key=lambda p: p.date)
-        return prices[-1].price
+        dates, prices = self._price_lookup(ticker)
+        idx = bisect_right(dates, as_of) - 1
+        if idx < 0:
+            raise IndexError("No price available at or before requested date")
+        return prices[idx]
 
     def get_dividends_by_ticker(
         self, from_date_exclusive: date, to_date_inclusive: date

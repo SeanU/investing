@@ -11,11 +11,9 @@ from math import sqrt
 from statistics import fmean, pstdev
 from typing import Literal, Sequence
 
-import polars as pl
-
 from investing.history import MarketHistory
 from investing.portfolio import Portfolio
-from investing.reporting import value_history
+from investing.reporting import _reporting_portfolios
 
 ReportingFrequency = Literal["daily", "weekly", "monthly"]
 
@@ -40,14 +38,29 @@ def _total_value_series(
     reporting_frequency: ReportingFrequency,
 ) -> tuple[list[date], list[float]]:
     """Dates and total portfolio values at reporting cadence (includes trade dates)."""
-    values = value_history(
-        list(portfolios), history, reporting_frequency
-    ).filter(pl.col("ticker") == "_TOTAL")
-    if values.is_empty():
+    expanded = _reporting_portfolios(list(portfolios), history, reporting_frequency)
+    if not expanded:
         return [], []
-    dates = values["date"].to_list()
-    vals = values["valuation"].to_list()
-    return dates, [float(v) for v in vals]
+
+    dates: list[date] = []
+    totals: list[float] = []
+    for snapshot in expanded:
+        qty_by_ticker: dict[str, float] = {}
+        for holding in snapshot.holdings:
+            qty_by_ticker[holding.ticker] = (
+                qty_by_ticker.get(holding.ticker, 0.0) + holding.quantity
+            )
+
+        total = 0.0
+        for ticker, quantity in qty_by_ticker.items():
+            value = history.get_price(ticker, snapshot.as_of_date) * quantity
+            # Keep parity with reporting.position_history rounding semantics.
+            total += round(value, 2)
+
+        dates.append(snapshot.as_of_date)
+        totals.append(total)
+
+    return dates, totals
 
 
 def _horizon_years(dates: Sequence[date]) -> float:
@@ -239,6 +252,38 @@ def _normalize_runs(
     if isinstance(first, Portfolio):
         return [list(runs)]  # type: ignore[arg-type]
     return [list(r) for r in runs]  # type: ignore[union-attr]
+
+
+def aggregate_simulation_metrics(
+    run_metrics: Sequence[SimulationMetrics],
+    *,
+    sortino_target_return_used: float | None = None,
+    success_target_wealth_used: float | None = None,
+) -> SimulationMetrics:
+    """Aggregate precomputed per-run metrics into one combined metric set."""
+    cagrs = [m.cagr for m in run_metrics if m.cagr is not None]
+    mdds = [m.max_drawdown for m in run_metrics if m.max_drawdown is not None]
+    stds = [m.std_dev_returns for m in run_metrics if m.std_dev_returns is not None]
+    sortinos = [m.sortino_ratio for m in run_metrics if m.sortino_ratio is not None]
+    terminals = [
+        m.terminal_wealth_p50 for m in run_metrics if m.terminal_wealth_p50 is not None
+    ]
+    successes = [
+        m.success_probability for m in run_metrics if m.success_probability is not None
+    ]
+
+    return SimulationMetrics(
+        cagr=fmean(cagrs) if cagrs else None,
+        max_drawdown=fmean(mdds) if mdds else None,
+        std_dev_returns=fmean(stds) if stds else None,
+        sortino_ratio=fmean(sortinos) if sortinos else None,
+        success_probability=fmean(successes) if successes else None,
+        terminal_wealth_p10=_percentile_linear(terminals, 0.10) if terminals else None,
+        terminal_wealth_p50=_percentile_linear(terminals, 0.50) if terminals else None,
+        terminal_wealth_p90=_percentile_linear(terminals, 0.90) if terminals else None,
+        sortino_target_return_used=sortino_target_return_used,
+        success_target_wealth_used=success_target_wealth_used,
+    )
 
 
 def compute_simulation_metrics(
