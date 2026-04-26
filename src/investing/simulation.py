@@ -277,37 +277,17 @@ def simulate(
     time_step: Callable[[date], date],
     end_date: date | None = None,
 ) -> SimulationResult:
-    def _ensure_final_snapshot(portfolios: list[Portfolio], as_of_date: date) -> None:
-        latest_portfolio = portfolios[-1]
-        if latest_portfolio.as_of_date == as_of_date:
-            return
-        portfolios.append(Portfolio(as_of_date, latest_portfolio.holdings))
-
-    starting_portfolio = _make_starting_portfolio(
-        history, strategy.starting_allocation, start_date, start_funds
-    )
-    portfolio_log = [starting_portfolio]
-    trade_log: list[Trade] = []
-    dividend_log: list[DividendPayment] = []
-
-    simulation_end_date = history.end_date
-    if end_date is not None:
-        simulation_end_date = min(simulation_end_date, end_date)
-
-    current_date = start_date
-    next_rebalance = strategy.next_rebalance(start_date)
-    while current_date < simulation_end_date:
-        previous_date = current_date
-        current_date = min(time_step(current_date), simulation_end_date)
-        previous_portfolio = portfolio_log[-1]
-        new_portfolio = previous_portfolio
+    def _apply_dividends(
+        portfolio: Portfolio, from_date: date, to_date: date
+    ) -> PortfolioTransition:
+        transition = PortfolioTransition(portfolio)
         dividends_by_payment_date = history.get_dividends_by_payment_date(
-            previous_date, current_date
+            from_date, to_date
         )
         for payment_date in sorted(dividends_by_payment_date):
             dividends = dividends_by_payment_date[payment_date]
-            payouts = new_portfolio.dividend_payouts(dividends)
-            holdings_by_ticker = new_portfolio.holdings_by_ticker()
+            payouts = transition.portfolio.dividend_payouts(dividends)
+            holdings_by_ticker = transition.portfolio.holdings_by_ticker()
             for ticker, ticker_dividends in dividends.items():
                 total_dividend_payment = payouts.get(ticker, 0.0)
                 if total_dividend_payment <= 0:
@@ -327,11 +307,45 @@ def simulate(
                         total_payment=total_dividend_payment,
                     )
                 )
-            transition = strategy.reinvest_dividends(
-                new_portfolio, history, payment_date, payouts
+            reinvestment = strategy.reinvest_dividends(
+                transition.portfolio, history, payment_date, payouts
             )
-            new_portfolio = transition.portfolio
-            trade_log.extend(transition.trades)
+            transition = transition.update(reinvestment)
+
+        return transition
+
+    def _ensure_final_snapshot(portfolios: list[Portfolio], as_of_date: date) -> None:
+        latest_portfolio = portfolios[-1]
+        if latest_portfolio.as_of_date == as_of_date:
+            return
+        dividend_transition = _apply_dividends(
+            latest_portfolio, latest_portfolio.as_of_date, as_of_date
+        )
+        trade_log.extend(dividend_transition.trades)
+        portfolios.append(Portfolio(as_of_date, dividend_transition.portfolio.holdings))
+
+    starting_portfolio = _make_starting_portfolio(
+        history, strategy.starting_allocation, start_date, start_funds
+    )
+    portfolio_log = [starting_portfolio]
+    trade_log: list[Trade] = []
+    dividend_log: list[DividendPayment] = []
+
+    simulation_end_date = history.end_date
+    if end_date is not None:
+        simulation_end_date = min(simulation_end_date, end_date)
+
+    current_date = start_date
+    next_rebalance = strategy.next_rebalance(start_date)
+    while current_date < simulation_end_date:
+        previous_date = current_date
+        current_date = min(time_step(current_date), simulation_end_date)
+        previous_portfolio = portfolio_log[-1]
+        dividend_transition = _apply_dividends(
+            previous_portfolio, previous_date, current_date
+        )
+        new_portfolio = dividend_transition.portfolio
+        trade_log.extend(dividend_transition.trades)
 
         if current_date >= next_rebalance:
             transition = strategy.reblance(new_portfolio, history, current_date)
