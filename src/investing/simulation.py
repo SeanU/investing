@@ -275,6 +275,7 @@ def simulate(
     start_funds: float,
     strategy: Strategy,
     time_step: Callable[[date], date],
+    end_date: date | None = None,
 ) -> SimulationResult:
     starting_portfolio = _make_starting_portfolio(
         history, strategy.starting_allocation, start_date, start_funds
@@ -283,11 +284,15 @@ def simulate(
     trade_log: list[Trade] = []
     dividend_log: list[DividendPayment] = []
 
+    simulation_end_date = history.end_date
+    if end_date is not None:
+        simulation_end_date = min(simulation_end_date, end_date)
+
     current_date = start_date
     next_rebalance = strategy.next_rebalance(start_date)
-    while current_date < history.end_date:
+    while current_date < simulation_end_date:
         previous_date = current_date
-        current_date = time_step(current_date)
+        current_date = min(time_step(current_date), simulation_end_date)
         previous_portfolio = portfolio_log[-1]
         new_portfolio = previous_portfolio
         dividends_by_payment_date = history.get_dividends_by_payment_date(

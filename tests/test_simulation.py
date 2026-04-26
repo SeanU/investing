@@ -432,3 +432,52 @@ def test_simulate_trade_log_contains_unique_events_without_snapshot_duplicates()
         for trade in simulation.trades
     ]
     assert len(trade_events) == len(set(trade_events))
+
+
+def test_simulate_end_date_limits_how_long_simulation_runs():
+    def quarterly_time_step(_: date) -> date:
+        return date(2026, 4, 1)
+
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2026, 2, 1), 10.0),
+                    d.Price(date(2026, 3, 1), 10.0),
+                    d.Price(date(2026, 4, 1), 20.0),
+                ],
+                [
+                    d.Dividend(
+                        amount=1.0,
+                        adjusted_amount=1.0,
+                        ex_date=date(2026, 1, 15),
+                        payment_date=date(2026, 2, 1),
+                    ),
+                    d.Dividend(
+                        amount=1.0,
+                        adjusted_amount=1.0,
+                        ex_date=date(2026, 2, 15),
+                        payment_date=date(2026, 3, 1),
+                    ),
+                ],
+            )
+        }
+    )
+    strategy = BuyAndHold(AssetAllocation([HoldingTarget("A", 1)]))
+    simulation = simulate(
+        market_history,
+        date(2026, 1, 1),
+        100.0,
+        strategy,
+        quarterly_time_step,
+        end_date=date(2026, 2, 1),
+    )
+
+    assert len(simulation.portfolios) == 2
+    assert simulation.portfolios[-1].as_of_date == date(2026, 2, 1)
+    assert len(simulation.trades) == 1
+    assert simulation.trades[0].trade_date == date(2026, 2, 1)
+    assert len(simulation.dividends) == 1
+    assert simulation.dividends[0].payment_date == date(2026, 2, 1)
