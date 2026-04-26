@@ -165,6 +165,7 @@ def test_simulate_keeps_single_snapshot_when_no_trades_are_made():
     assert len(simulation.portfolios) == 1
     assert simulation.portfolios[0].as_of_date == date(2026, 1, 1)
     assert simulation.trades == []
+    assert simulation.dividends == []
 
 
 def test_simulate_applies_dividends_on_payment_date():
@@ -207,6 +208,13 @@ def test_simulate_applies_dividends_on_payment_date():
     assert simulation.trades[-1].kind == "buy"
     assert simulation.trades[-1].ticker == "A"
     assert simulation.trades[-1].quantity == pytest.approx(1.0)
+    assert len(simulation.dividends) == 1
+    dividend_payment = simulation.dividends[0]
+    assert dividend_payment.payment_date == date(2026, 2, 1)
+    assert dividend_payment.ticker == "A"
+    assert dividend_payment.shares_held == pytest.approx(10.0)
+    assert dividend_payment.amount_per_share == pytest.approx(1.0)
+    assert dividend_payment.total_payment == pytest.approx(10.0)
 
 
 def test_simulate_does_not_apply_dividends_before_payment_date():
@@ -241,6 +249,7 @@ def test_simulate_does_not_apply_dividends_before_payment_date():
     assert len(simulation.portfolios) == 1
     assert simulation.portfolios[0].holdings[0].quantity == pytest.approx(10.0)
     assert simulation.trades == []
+    assert simulation.dividends == []
 
 
 def test_dividend_reinvestment_happens_before_rebalance():
@@ -376,6 +385,17 @@ def test_simulate_processes_each_payment_date_without_lumping():
     assert simulation.trades[1].trade_date == date(2026, 3, 1)
     assert simulation.trades[0].quantity == pytest.approx(1.0)
     assert simulation.trades[1].quantity == pytest.approx(1.1)
+    assert len(simulation.dividends) == 2
+    assert simulation.dividends[0].payment_date == date(2026, 2, 1)
+    assert simulation.dividends[0].ticker == "A"
+    assert simulation.dividends[0].shares_held == pytest.approx(10.0)
+    assert simulation.dividends[0].amount_per_share == pytest.approx(1.0)
+    assert simulation.dividends[0].total_payment == pytest.approx(10.0)
+    assert simulation.dividends[1].payment_date == date(2026, 3, 1)
+    assert simulation.dividends[1].ticker == "A"
+    assert simulation.dividends[1].shares_held == pytest.approx(11.0)
+    assert simulation.dividends[1].amount_per_share == pytest.approx(1.0)
+    assert simulation.dividends[1].total_payment == pytest.approx(11.0)
 
 
 def test_simulate_trade_log_contains_unique_events_without_snapshot_duplicates():

@@ -9,9 +9,19 @@ from investing.portfolio import AssetAllocation, Holding, Portfolio, PortfolioTr
 
 
 @dataclass
+class DividendPayment:
+    payment_date: date
+    ticker: Ticker
+    shares_held: float
+    amount_per_share: float
+    total_payment: float
+
+
+@dataclass
 class SimulationResult:
     portfolios: list[Portfolio]
-    trades: list[Trade] 
+    trades: list[Trade]
+    dividends: list[DividendPayment]
 
 
 class Strategy(ABC):
@@ -271,6 +281,7 @@ def simulate(
     )
     portfolio_log = [starting_portfolio]
     trade_log: list[Trade] = []
+    dividend_log: list[DividendPayment] = []
 
     current_date = start_date
     next_rebalance = strategy.next_rebalance(start_date)
@@ -285,6 +296,26 @@ def simulate(
         for payment_date in sorted(dividends_by_payment_date):
             dividends = dividends_by_payment_date[payment_date]
             payouts = new_portfolio.dividend_payouts(dividends)
+            holdings_by_ticker = new_portfolio.holdings_by_ticker()
+            for ticker, ticker_dividends in dividends.items():
+                total_dividend_payment = payouts.get(ticker, 0.0)
+                if total_dividend_payment <= 0:
+                    continue
+                shares_held = sum(
+                    holding.quantity for holding in holdings_by_ticker.get(ticker, [])
+                )
+                amount_per_share = sum(
+                    dividend.adjusted_amount for dividend in ticker_dividends
+                )
+                dividend_log.append(
+                    DividendPayment(
+                        payment_date=payment_date,
+                        ticker=ticker,
+                        shares_held=shares_held,
+                        amount_per_share=amount_per_share,
+                        total_payment=total_dividend_payment,
+                    )
+                )
             transition = strategy.reinvest_dividends(
                 new_portfolio, history, payment_date, payouts
             )
@@ -300,4 +331,4 @@ def simulate(
         if new_portfolio != previous_portfolio:
             portfolio_log.append(new_portfolio)
 
-    return SimulationResult(portfolio_log, trade_log)
+    return SimulationResult(portfolio_log, trade_log, dividend_log)

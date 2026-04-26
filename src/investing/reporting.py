@@ -1,9 +1,13 @@
+import calendar
 from datetime import date, timedelta
 from typing import Literal
+
 import polars as pl
 
 from investing.history import MarketHistory
 from investing.portfolio import Portfolio
+
+ReportingFrequency = Literal["daily", "weekly", "monthly"]
 
 
 def _next_month(current_date: date) -> date:
@@ -14,13 +18,15 @@ def _next_month(current_date: date) -> date:
         next_year += 1
         next_month = 1
 
-    return date(next_year, next_month, current_date.day)
+    last_day_of_next_month = calendar.monthrange(next_year, next_month)[1]
+    next_day = min(current_date.day, last_day_of_next_month)
+    return date(next_year, next_month, next_day)
 
 
 def _reporting_dates(
     portfolios: list[Portfolio],
     history: MarketHistory,
-    reporting_frequency: Literal["daily", "weekly", "monthly"],
+    reporting_frequency: ReportingFrequency,
 ) -> list[date]:
     if not portfolios:
         return []
@@ -49,7 +55,7 @@ def _reporting_dates(
 def _reporting_portfolios(
     portfolios: list[Portfolio],
     history: MarketHistory,
-    reporting_frequency: Literal["daily", "weekly", "monthly"],
+    reporting_frequency: ReportingFrequency,
 ) -> list[Portfolio]:
     if not portfolios:
         return []
@@ -84,7 +90,7 @@ def _reporting_portfolios(
 def position_history(
     portfolios: list[Portfolio],
     history: MarketHistory,
-    reporting_frequency: Literal["daily", "weekly", "monthly"],
+    reporting_frequency: ReportingFrequency,
 ) -> pl.DataFrame:
     expanded = _reporting_portfolios(portfolios, history, reporting_frequency)
     if not expanded:
@@ -122,7 +128,7 @@ def position_history(
 def value_history(
     portfolios: list[Portfolio],
     history: MarketHistory,
-    reporting_frequency: Literal["daily", "weekly", "monthly"],
+    reporting_frequency: ReportingFrequency,
 ) -> pl.DataFrame:
     positions = position_history(portfolios, history, reporting_frequency)
     if positions.is_empty():
