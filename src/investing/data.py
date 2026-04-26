@@ -10,6 +10,15 @@ IGNORE_SHEETS = ["Overview"]
 Ticker: TypeAlias = str
 
 
+def _cell_to_date(value: datetime | date | None) -> date | None:
+    """Excel cells may be parsed as date or datetime depending on file/engine."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    return value
+
+
 @dataclass
 class Dividend:
     amount: float
@@ -31,17 +40,21 @@ def load_ticker_dividends(path: str, ticker: Ticker) -> list[Dividend]:
         has_header=True,
         columns=["Ex-Dividend Date", "Payment Date", "Adjusted Dividend", "Dividend"],
     )
-    return [
-        Dividend(
-            row["Dividend"],
-            row["Adjusted Dividend"],
-            row["Ex-Dividend Date"].date(),
-            row["Payment Date"].date()
-            if row["Payment Date"]
-            else row["Ex-Dividend Date"].date() + timedelta(days=3),
+    dividends: list[Dividend] = []
+    for row in df.iter_rows(named=True):
+        ex = _cell_to_date(row["Ex-Dividend Date"])
+        if ex is None:
+            continue
+        pay = _cell_to_date(row["Payment Date"])
+        dividends.append(
+            Dividend(
+                row["Dividend"],
+                row["Adjusted Dividend"],
+                ex,
+                pay if pay is not None else ex + timedelta(days=3),
+            )
         )
-        for row in df.iter_rows(named=True)
-    ]
+    return dividends
 
 
 def load_dividends(path: str) -> dict[Ticker, list[Dividend]]:
@@ -59,13 +72,13 @@ def load_ticker_prices(path: str, ticker: Ticker) -> list[Price]:
         has_header=True,
         columns=["Date", "Price"],
     )
-    return [
-        Price(
-            row["Date"].date(),
-            row["Price"],
-        )
-        for row in df.iter_rows(named=True)
-    ]
+    prices: list[Price] = []
+    for row in df.iter_rows(named=True):
+        d = _cell_to_date(row["Date"])
+        if d is None:
+            continue
+        prices.append(Price(d, row["Price"]))
+    return prices
 
 
 def load_prices(path: str) -> dict[Ticker, list[Price]]:

@@ -1,0 +1,12 @@
+{
+  "tickers": {
+    "VTSAX": "Vanguard Total Stock Market Index Admiral",
+    "VTIAX": "Vanguard Total International Stock Index Admiral",
+    "VFWAX": "Vanguard FTSE All-World ex-US Index Admiral",
+    "VBTLX": "Vanguard Total Bond Market Index Admiral",
+    "VMFXX": "Vanguard Federal Money Market Investor"
+  },
+  "price_history": {
+    "from": "2010-01-01"
+  }
+}

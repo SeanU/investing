@@ -11,3 +11,7 @@ wheels/
 
 .vscode/
 data/
+
+# Google Sheets CLI OAuth (local only)
+.google-sheets-token.json
+credentials.json
