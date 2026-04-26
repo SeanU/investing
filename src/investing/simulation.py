@@ -459,6 +459,7 @@ def _run_simulations_for_strategy(
     years: int,
     start_funds: float,
     start_dates: Sequence[date],
+    plan_target_return: float | None,
     show_progress: bool,
 ) -> MultiSimulationResult:
     simulations: list[SimulationResult] = []
@@ -488,6 +489,7 @@ def _run_simulations_for_strategy(
             compute_simulation_metrics(
                 result.portfolios,
                 history,
+                plan_target_return=plan_target_return,
                 start_funds=start_funds,
             )
         )
@@ -506,6 +508,7 @@ def simulate_many(
     years: int,
     start_funds: float,
     num_simulations: int,
+    plan_target_return: float | None = None,
     seed: int | None = None,
     show_progress: bool = False,
 ) -> MultiSimulationResult | MultiStrategySimulationResult:
@@ -535,6 +538,7 @@ def simulate_many(
             years=years,
             start_funds=start_funds,
             start_dates=start_dates,
+            plan_target_return=plan_target_return,
             show_progress=show_progress,
         )
 
@@ -547,6 +551,7 @@ def simulate_many(
             years=years,
             start_funds=start_funds,
             start_dates=start_dates,
+            plan_target_return=plan_target_return,
             show_progress=show_progress,
         )
 
