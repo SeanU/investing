@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
+from random import Random
 
 from investing.data import Ticker
 from investing.history import MarketHistory
+from investing.metrics import SimulationMetrics, compute_simulation_metrics
 from investing.portfolio import AssetAllocation, Holding, Portfolio, PortfolioTransition, Trade
 
 
@@ -21,6 +23,13 @@ class SimulationResult:
     portfolios: list[Portfolio]
     trades: list[Trade]
     dividends: list[DividendPayment]
+
+
+@dataclass
+class MultiSimulationResult:
+    simulations: list[SimulationResult]
+    run_metrics: list[SimulationMetrics]
+    metrics: SimulationMetrics
 
 
 class Strategy(ABC):
@@ -351,3 +360,103 @@ def simulate(
     _ensure_final_snapshot(portfolio_log, simulation_end_date)
 
     return SimulationResult(portfolio_log, trade_log, dividend_log)
+
+
+def _add_years(when: date, years: int) -> date:
+    """Add calendar years, clamping leap-day overflow to Feb 28."""
+    try:
+        return when.replace(year=when.year + years)
+    except ValueError:
+        return when.replace(month=2, day=28, year=when.year + years)
+
+
+def _strategy_tickers(strategy: Strategy) -> set[Ticker]:
+    return set(strategy.starting_allocation.proportions.keys())
+
+
+def _first_price_date(history: MarketHistory, ticker: Ticker) -> date:
+    prices = history.securities[ticker].prices
+    return min(price.date for price in prices)
+
+
+def _start_date_bounds(
+    history: MarketHistory, strategy: Strategy, years: int
+) -> tuple[date, date]:
+    if years <= 0:
+        raise ValueError("years must be greater than 0")
+
+    tickers = _strategy_tickers(strategy)
+    if not tickers:
+        raise ValueError("strategy must include at least one ticker")
+
+    earliest_start = max(_first_price_date(history, ticker) for ticker in tickers)
+    latest_start = _add_years(history.end_date, -years)
+    if earliest_start > latest_start:
+        raise ValueError("no valid start-date window for requested simulation horizon")
+
+    return earliest_start, latest_start
+
+
+def _random_start_dates(
+    history: MarketHistory,
+    strategy: Strategy,
+    years: int,
+    num_simulations: int,
+    rng: Random,
+) -> list[date]:
+    if num_simulations <= 0:
+        raise ValueError("num_simulations must be greater than 0")
+
+    earliest_start, latest_start = _start_date_bounds(history, strategy, years)
+    candidate_days = (latest_start - earliest_start).days + 1
+    return [
+        earliest_start + timedelta(days=rng.randrange(candidate_days))
+        for _ in range(num_simulations)
+    ]
+
+
+def simulate_many(
+    strategy: Strategy,
+    history: MarketHistory,
+    years: int,
+    start_funds: float,
+    num_simulations: int,
+    seed: int | None = None,
+) -> MultiSimulationResult:
+    """Run multiple randomized simulations for the given strategy."""
+    rng = Random(seed)
+    start_dates = _random_start_dates(
+        history, strategy, years, num_simulations, rng=rng
+    )
+    simulations: list[SimulationResult] = []
+    run_metrics: list[SimulationMetrics] = []
+
+    for start_date in start_dates:
+        end_date = _add_years(start_date, years)
+        result = simulate(
+            history=history,
+            start_date=start_date,
+            start_funds=start_funds,
+            strategy=strategy,
+            end_date=end_date,
+        )
+        simulations.append(result)
+        run_metrics.append(
+            compute_simulation_metrics(
+                result.portfolios,
+                history,
+                start_funds=start_funds,
+            )
+        )
+
+    aggregate_metrics = compute_simulation_metrics(
+        [result.portfolios for result in simulations],
+        history,
+        start_funds=start_funds,
+    )
+
+    return MultiSimulationResult(
+        simulations=simulations,
+        run_metrics=run_metrics,
+        metrics=aggregate_metrics,
+    )

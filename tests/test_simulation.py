@@ -12,7 +12,16 @@ from investing.simulation import (
     BuyAndHold,
     Strategy,
     simulate,
+    simulate_many,
 )
+
+
+def _expected_end_date(start_date: date, years: int) -> date:
+    """Mirror simulation._add_years leap-day handling for test expectations."""
+    try:
+        return start_date.replace(year=start_date.year + years)
+    except ValueError:
+        return start_date.replace(month=2, day=28, year=start_date.year + years)
 
 
 def test__smoke_test():
@@ -492,3 +501,134 @@ def test_simulate_end_date_limits_how_long_simulation_runs():
     assert simulation.trades[0].trade_date == date(2026, 2, 1)
     assert len(simulation.dividends) == 1
     assert simulation.dividends[0].payment_date == date(2026, 2, 1)
+
+
+def test_simulate_many_returns_results_per_run_and_aggregate_metrics():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2027, 1, 1), 11.0),
+                    d.Price(date(2028, 1, 1), 12.0),
+                ],
+                [],
+            )
+        }
+    )
+    strategy = BuyAndHold(AssetAllocation([HoldingTarget("A", 1)]))
+
+    result = simulate_many(
+        strategy=strategy,
+        history=market_history,
+        years=1,
+        start_funds=100.0,
+        num_simulations=5,
+        seed=7,
+    )
+
+    assert len(result.simulations) == 5
+    assert len(result.run_metrics) == 5
+    assert result.metrics.terminal_wealth_p10 is not None
+    assert result.metrics.terminal_wealth_p50 is not None
+    assert result.metrics.terminal_wealth_p90 is not None
+    for simulation, run_metric in zip(result.simulations, result.run_metrics):
+        expected = simulate(
+            history=market_history,
+            start_date=simulation.portfolios[0].as_of_date,
+            start_funds=100.0,
+            strategy=strategy,
+            end_date=simulation.portfolios[-1].as_of_date,
+        )
+        assert run_metric.terminal_wealth_p50 == pytest.approx(
+            expected.portfolios[-1].total_value(
+                expected.portfolios[-1].as_of_date, market_history
+            )
+        )
+
+
+def test_simulate_many_respects_start_window_and_horizon():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2027, 1, 1), 11.0),
+                    d.Price(date(2028, 12, 31), 12.0),
+                ],
+                [],
+            ),
+            "B": h.SecurityHistory(
+                "B",
+                [
+                    d.Price(date(2026, 3, 1), 20.0),
+                    d.Price(date(2027, 3, 1), 21.0),
+                    d.Price(date(2028, 12, 31), 22.0),
+                ],
+                [],
+            ),
+        }
+    )
+    strategy = BuyAndHold(AssetAllocation([HoldingTarget("A", 1), HoldingTarget("B", 1)]))
+
+    result = simulate_many(
+        strategy=strategy,
+        history=market_history,
+        years=1,
+        start_funds=100.0,
+        num_simulations=20,
+        seed=3,
+    )
+
+    earliest_start = date(2026, 3, 1)
+    latest_start = date(2027, 12, 31)
+    for simulation in result.simulations:
+        start_date = simulation.portfolios[0].as_of_date
+        end_date = simulation.portfolios[-1].as_of_date
+        assert earliest_start <= start_date <= latest_start
+        assert end_date == _expected_end_date(start_date, 1)
+
+
+def test_simulate_many_raises_for_invalid_inputs_or_window():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2026, 6, 1), 11.0),
+                ],
+                [],
+            )
+        }
+    )
+    strategy = BuyAndHold(AssetAllocation([HoldingTarget("A", 1)]))
+
+    with pytest.raises(ValueError, match="years must be greater than 0"):
+        simulate_many(
+            strategy=strategy,
+            history=market_history,
+            years=0,
+            start_funds=100.0,
+            num_simulations=1,
+        )
+
+    with pytest.raises(ValueError, match="num_simulations must be greater than 0"):
+        simulate_many(
+            strategy=strategy,
+            history=market_history,
+            years=1,
+            start_funds=100.0,
+            num_simulations=0,
+        )
+
+    with pytest.raises(ValueError, match="no valid start-date window"):
+        simulate_many(
+            strategy=strategy,
+            history=market_history,
+            years=1,
+            start_funds=100.0,
+            num_simulations=1,
+        )
