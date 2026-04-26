@@ -277,6 +277,12 @@ def simulate(
     time_step: Callable[[date], date],
     end_date: date | None = None,
 ) -> SimulationResult:
+    def _ensure_final_snapshot(portfolios: list[Portfolio], as_of_date: date) -> None:
+        latest_portfolio = portfolios[-1]
+        if latest_portfolio.as_of_date == as_of_date:
+            return
+        portfolios.append(Portfolio(as_of_date, latest_portfolio.holdings))
+
     starting_portfolio = _make_starting_portfolio(
         history, strategy.starting_allocation, start_date, start_funds
     )
@@ -335,5 +341,7 @@ def simulate(
 
         if new_portfolio != previous_portfolio:
             portfolio_log.append(new_portfolio)
+
+    _ensure_final_snapshot(portfolio_log, simulation_end_date)
 
     return SimulationResult(portfolio_log, trade_log, dividend_log)

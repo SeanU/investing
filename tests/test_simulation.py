@@ -132,11 +132,11 @@ class _NeverTradeStrategy(Strategy):
         return p.PortfolioTransition(portfolio)
 
 
-def test_simulate_keeps_single_snapshot_when_no_trades_are_made():
+def test_simulate_keeps_start_and_end_snapshots_when_no_trades_are_made():
     """Given: strategy that never trades.
 
     Expected output:
-      - simulate returns only the starting portfolio snapshot
+      - simulate returns starting and ending portfolio snapshots
       - no per-time-step portfolio clones are added
     """
     market_history = h.MarketHistory(
@@ -162,10 +162,44 @@ def test_simulate_keeps_single_snapshot_when_no_trades_are_made():
         monthly_time_step,
     )
 
-    assert len(simulation.portfolios) == 1
+    assert len(simulation.portfolios) == 2
     assert simulation.portfolios[0].as_of_date == date(2026, 1, 1)
+    assert simulation.portfolios[-1].as_of_date == date(2026, 3, 1)
     assert simulation.trades == []
     assert simulation.dividends == []
+
+
+def test_simulate_does_not_duplicate_final_snapshot_when_end_date_already_logged():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2026, 2, 1), 10.0),
+                ],
+                [
+                    d.Dividend(
+                        amount=1.0,
+                        adjusted_amount=1.0,
+                        ex_date=date(2026, 1, 15),
+                        payment_date=date(2026, 2, 1),
+                    )
+                ],
+            )
+        }
+    )
+    strategy = BuyAndHold(AssetAllocation([HoldingTarget("A", 1)]))
+    simulation = simulate(
+        market_history,
+        date(2026, 1, 1),
+        100.0,
+        strategy,
+        monthly_time_step,
+    )
+
+    assert len(simulation.portfolios) == 2
+    assert simulation.portfolios[-1].as_of_date == date(2026, 2, 1)
 
 
 def test_simulate_applies_dividends_on_payment_date():
@@ -246,8 +280,9 @@ def test_simulate_does_not_apply_dividends_before_payment_date():
         monthly_time_step,
     )
 
-    assert len(simulation.portfolios) == 1
+    assert len(simulation.portfolios) == 2
     assert simulation.portfolios[0].holdings[0].quantity == pytest.approx(10.0)
+    assert simulation.portfolios[-1].as_of_date == date(2026, 2, 1)
     assert simulation.trades == []
     assert simulation.dividends == []
 
@@ -377,9 +412,9 @@ def test_simulate_processes_each_payment_date_without_lumping():
         quarterly_time_step,
     )
 
-    assert len(simulation.portfolios) == 2
+    assert len(simulation.portfolios) == 3
     final_portfolio = simulation.portfolios[-1]
-    assert final_portfolio.as_of_date == date(2026, 3, 1)
+    assert final_portfolio.as_of_date == date(2026, 4, 1)
     assert len(simulation.trades) == 2
     assert simulation.trades[0].trade_date == date(2026, 2, 1)
     assert simulation.trades[1].trade_date == date(2026, 3, 1)
