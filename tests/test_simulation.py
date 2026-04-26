@@ -549,6 +549,40 @@ def test_simulate_many_returns_results_per_run_and_aggregate_metrics():
         )
 
 
+def test_simulate_many_applies_plan_target_return_to_metrics():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2027, 1, 1), 11.0),
+                    d.Price(date(2028, 1, 1), 9.0),
+                    d.Price(date(2028, 12, 31), 12.0),
+                ],
+                [],
+            )
+        }
+    )
+    strategy = BuyAndHold(AssetAllocation([HoldingTarget("A", 1)]))
+
+    result = simulate_many(
+        strategy=strategy,
+        history=market_history,
+        years=1,
+        start_funds=100.0,
+        num_simulations=6,
+        plan_target_return=0.04,
+        seed=7,
+    )
+
+    assert result.metrics.sortino_ratio is not None
+    assert result.metrics.success_probability is not None
+    for run_metric in result.run_metrics:
+        assert run_metric.sortino_ratio is not None
+        assert run_metric.success_probability is not None
+
+
 def test_simulate_many_respects_start_window_and_horizon():
     market_history = h.MarketHistory(
         {
