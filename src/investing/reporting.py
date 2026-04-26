@@ -1,6 +1,6 @@
 import calendar
 from datetime import date, timedelta
-from typing import Literal
+from typing import Literal, cast
 
 import polars as pl
 
@@ -8,6 +8,18 @@ from investing.history import MarketHistory
 from investing.portfolio import Portfolio
 
 ReportingFrequency = Literal["daily", "weekly", "monthly"]
+
+REPORTING_FREQUENCY_CHOICES: frozenset[str] = frozenset({"daily", "weekly", "monthly"})
+
+REPORTING_FREQUENCY_ERROR = (
+    "reporting_frequency must be one of: daily, weekly, monthly"
+)
+
+
+def validate_reporting_frequency(value: str) -> ReportingFrequency:
+    if value in REPORTING_FREQUENCY_CHOICES:
+        return cast(ReportingFrequency, value)
+    raise ValueError(REPORTING_FREQUENCY_ERROR)
 
 
 def _next_month(current_date: date) -> date:
@@ -32,21 +44,21 @@ def _reporting_dates(
         return []
 
     start_date = min(portfolio.as_of_date for portfolio in portfolios)
+    steppers = {
+        "daily": lambda d: d + timedelta(days=1),
+        "weekly": lambda d: d + timedelta(days=7),
+        "monthly": _next_month,
+    }
+    if reporting_frequency not in steppers:
+        raise ValueError(REPORTING_FREQUENCY_ERROR)
+    next_date = steppers[reporting_frequency]
+
     cadence_dates: list[date] = []
 
     current_date = start_date
     while current_date <= history.end_date:
         cadence_dates.append(current_date)
-        if reporting_frequency == "daily":
-            current_date += timedelta(days=1)
-        elif reporting_frequency == "weekly":
-            current_date += timedelta(days=7)
-        elif reporting_frequency == "monthly":
-            current_date = _next_month(current_date)
-        else:
-            raise ValueError(
-                "reporting_frequency must be one of: daily, weekly, monthly"
-            )
+        current_date = next_date(current_date)
 
     trade_dates = [portfolio.as_of_date for portfolio in portfolios]
     return sorted(set(cadence_dates + trade_dates))
@@ -123,6 +135,25 @@ def position_history(
             (pl.col("price") * pl.col("quantity")).round(2).alias("valuation")
         )
     )
+
+
+def total_value_series(
+    portfolios: list[Portfolio],
+    history: MarketHistory,
+    reporting_frequency: ReportingFrequency,
+) -> tuple[list[date], list[float]]:
+    """Dates and total portfolio value at each reporting point.
+
+    Valuations match :func:`position_history` (per-line ``round`` then sum per
+    date).
+    """
+    positions = position_history(portfolios, history, reporting_frequency)
+    if positions.is_empty():
+        return [], []
+    by_date = positions.group_by("date").agg(
+        pl.sum("valuation").alias("total")
+    ).sort("date")
+    return by_date["date"].to_list(), by_date["total"].to_list()
 
 
 def value_history(

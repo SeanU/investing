@@ -99,7 +99,7 @@ def test_annual_rebalance_keeps_total_value_constant_during_reallocation():
         ],
     )
 
-    transition = strategy.reblance(portfolio, market_history, date(2026, 1, 1))
+    transition = strategy.rebalance(portfolio, market_history, date(2026, 1, 1))
     rebalanced = transition.portfolio
     rebalanced_values = rebalanced.value_by_ticker(date(2026, 1, 1), market_history)
 
@@ -114,7 +114,7 @@ class _NeverTradeStrategy(Strategy):
     def next_rebalance(self, current_date: date) -> date:
         return date.max
 
-    def reblance(
+    def rebalance(
         self, portfolio: p.Portfolio, history: h.MarketHistory, current_date: date
     ) -> p.PortfolioTransition:
         return p.PortfolioTransition(portfolio)
@@ -304,7 +304,7 @@ def test_dividend_reinvestment_happens_before_rebalance():
                     trades.extend(transition.trades)
             return p.PortfolioTransition(reinvested, trades)
 
-        def reblance(
+        def rebalance(
             self, portfolio: p.Portfolio, history: h.MarketHistory, current_date: date
         ) -> p.PortfolioTransition:
             value_by_ticker = portfolio.value_by_ticker(current_date, history)

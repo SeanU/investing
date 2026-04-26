@@ -54,33 +54,15 @@ class Strategy(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def reblance(
+    def rebalance(
         self, portfolio: Portfolio, history: MarketHistory, current_date: date
     ) -> PortfolioTransition:
         raise NotImplementedError()
 
-    @abstractmethod
-    def reinvest_dividends(
-        self,
-        portfolio: Portfolio,
-        history: MarketHistory,
-        current_date: date,
-        payouts: dict[Ticker, float],
-    ) -> PortfolioTransition:
-        raise NotImplementedError()
-
-
-class BuyAndHold(Strategy):
-    def __init__(self, target_allocation: AssetAllocation):
-        super().__init__(target_allocation)
-
-    def next_rebalance(self, current_date: date) -> date:
-        return date.max
-
     def reblance(
         self, portfolio: Portfolio, history: MarketHistory, current_date: date
     ) -> PortfolioTransition:
-        return PortfolioTransition(portfolio)
+        return self.rebalance(portfolio, history, current_date)
 
     def reinvest_dividends(
         self,
@@ -95,8 +77,20 @@ class BuyAndHold(Strategy):
                 transition = transition.update(
                     transition.portfolio.buy(ticker, amount, current_date, history)
                 )
-
         return transition
+
+
+class BuyAndHold(Strategy):
+    def __init__(self, target_allocation: AssetAllocation):
+        super().__init__(target_allocation)
+
+    def next_rebalance(self, current_date: date) -> date:
+        return date.max
+
+    def rebalance(
+        self, portfolio: Portfolio, history: MarketHistory, current_date: date
+    ) -> PortfolioTransition:
+        return PortfolioTransition(portfolio)
 
 
 class AnnualRebalance(Strategy):
@@ -239,7 +233,7 @@ class AnnualRebalance(Strategy):
 
         return PortfolioTransition(portfolio)
 
-    def reblance(
+    def rebalance(
         self, portfolio: Portfolio, history: MarketHistory, current_date: date
     ) -> PortfolioTransition:
         over_transition = self._distribute_overallocations(
@@ -249,22 +243,6 @@ class AnnualRebalance(Strategy):
             over_transition.portfolio, history, current_date
         )
         return over_transition.update(under_transition)
-
-    def reinvest_dividends(
-        self,
-        portfolio: Portfolio,
-        history: MarketHistory,
-        current_date: date,
-        payouts: dict[Ticker, float],
-    ) -> PortfolioTransition:
-        transition = PortfolioTransition(portfolio)
-        for ticker, amount in payouts.items():
-            if amount > 0:
-                transition = transition.update(
-                    transition.portfolio.buy(ticker, amount, current_date, history)
-                )
-
-        return transition
 
 
 def _make_starting_portfolio(
@@ -365,7 +343,7 @@ def simulate(
         trade_log.extend(dividend_transition.trades)
 
         while current_date >= next_rebalance:
-            transition = strategy.reblance(new_portfolio, history, current_date)
+            transition = strategy.rebalance(new_portfolio, history, current_date)
             new_portfolio = transition.portfolio
             trade_log.extend(transition.trades)
             upcoming_rebalance = strategy.next_rebalance(next_rebalance)

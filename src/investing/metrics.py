@@ -9,13 +9,15 @@ from dataclasses import dataclass
 from datetime import date
 from math import sqrt
 from statistics import fmean, pstdev
-from typing import Literal, Sequence
+from typing import Sequence
 
 from investing.history import MarketHistory
 from investing.portfolio import Portfolio
-from investing.reporting import _reporting_portfolios
-
-ReportingFrequency = Literal["daily", "weekly", "monthly"]
+from investing.reporting import (
+    REPORTING_FREQUENCY_ERROR,
+    ReportingFrequency,
+    total_value_series,
+)
 
 _DAYS_PER_YEAR = 365.25
 
@@ -27,40 +29,26 @@ def _periods_per_year(reporting_frequency: ReportingFrequency) -> int:
         return 52
     if reporting_frequency == "monthly":
         return 12
-    raise ValueError(
-        "reporting_frequency must be one of: daily, weekly, monthly"
-    )
+    raise ValueError(REPORTING_FREQUENCY_ERROR)
 
 
-def _total_value_series(
-    portfolios: Sequence[Portfolio],
-    history: MarketHistory,
-    reporting_frequency: ReportingFrequency,
-) -> tuple[list[date], list[float]]:
-    """Dates and total portfolio values at reporting cadence (includes trade dates)."""
-    expanded = _reporting_portfolios(list(portfolios), history, reporting_frequency)
-    if not expanded:
-        return [], []
+def _fmean_or_none(values: list[float]) -> float | None:
+    return fmean(values) if values else None
 
-    dates: list[date] = []
-    totals: list[float] = []
-    for snapshot in expanded:
-        qty_by_ticker: dict[str, float] = {}
-        for holding in snapshot.holdings:
-            qty_by_ticker[holding.ticker] = (
-                qty_by_ticker.get(holding.ticker, 0.0) + holding.quantity
-            )
 
-        total = 0.0
-        for ticker, quantity in qty_by_ticker.items():
-            value = history.get_price(ticker, snapshot.as_of_date) * quantity
-            # Keep parity with reporting.position_history rounding semantics.
-            total += round(value, 2)
-
-        dates.append(snapshot.as_of_date)
-        totals.append(total)
-
-    return dates, totals
+def _percentile_linear(values: Sequence[float], p: float) -> float | None:
+    """Linear interpolation between closest ranks (common P10/P50/P90)."""
+    if not values:
+        return None
+    xs = sorted(values)
+    n = len(xs)
+    if n == 1:
+        return float(xs[0])
+    k = (n - 1) * p
+    f0 = int(k)
+    f1 = min(f0 + 1, n - 1)
+    w = k - f0
+    return float(xs[f0] * (1 - w) + xs[f1] * w)
 
 
 def _horizon_years(dates: Sequence[date]) -> float:
@@ -98,21 +86,6 @@ def _simple_returns(values: Sequence[float]) -> list[float]:
             continue
         out.append((cur - prev) / prev)
     return out
-
-
-def _percentile_linear(sorted_values: Sequence[float], p: float) -> float | None:
-    """Linear interpolation between closest ranks (common P10/P50/P90)."""
-    if not sorted_values:
-        return None
-    xs = sorted(sorted_values)
-    n = len(xs)
-    if n == 1:
-        return float(xs[0])
-    k = (n - 1) * p
-    f0 = int(k)
-    f1 = min(f0 + 1, n - 1)
-    w = k - f0
-    return float(xs[f0] * (1 - w) + xs[f1] * w)
 
 
 def _annualized_std(
@@ -186,7 +159,7 @@ def _path_metrics_single_run(
     mar_annual: float | None,
 ) -> _SingleRunMetrics:
     """Returns cagr, max_dd, std_ann, sortino, terminal_wealth."""
-    dates, vals = _total_value_series(portfolios, history, reporting_frequency)
+    dates, vals = total_value_series(list(portfolios), history, reporting_frequency)
     if len(vals) < 2 or len(dates) < 2:
         terminal = vals[-1] if vals else None
         return _SingleRunMetrics(
@@ -273,11 +246,11 @@ def aggregate_simulation_metrics(
     ]
 
     return SimulationMetrics(
-        cagr=fmean(cagrs) if cagrs else None,
-        max_drawdown=fmean(mdds) if mdds else None,
-        std_dev_returns=fmean(stds) if stds else None,
-        sortino_ratio=fmean(sortinos) if sortinos else None,
-        success_probability=fmean(successes) if successes else None,
+        cagr=_fmean_or_none(cagrs),
+        max_drawdown=_fmean_or_none(mdds),
+        std_dev_returns=_fmean_or_none(stds),
+        sortino_ratio=_fmean_or_none(sortinos),
+        success_probability=_fmean_or_none(successes),
         terminal_wealth_p10=_percentile_linear(terminals, 0.10) if terminals else None,
         terminal_wealth_p50=_percentile_linear(terminals, 0.50) if terminals else None,
         terminal_wealth_p90=_percentile_linear(terminals, 0.90) if terminals else None,
@@ -329,7 +302,7 @@ def compute_simulation_metrics(
         )
 
     first = run_list[0]
-    dates0, vals0 = _total_value_series(first, history, reporting_frequency)
+    dates0, vals0 = total_value_series(first, history, reporting_frequency)
     horizon_years = _horizon_years(dates0)
     if start_funds is not None:
         initial_wealth = float(start_funds)
@@ -370,11 +343,11 @@ def compute_simulation_metrics(
         if run_metrics.terminal_wealth is not None:
             terminals.append(run_metrics.terminal_wealth)
 
-    cagr_mean = fmean(cagrs) if cagrs else None
-    mdd_mean = fmean(mdds) if mdds else None
-    std_mean = fmean(stds) if stds else None
+    cagr_mean = _fmean_or_none(cagrs)
+    mdd_mean = _fmean_or_none(mdds)
+    std_mean = _fmean_or_none(stds)
 
-    sortino_mean = fmean(sortinos) if sortinos else None
+    sortino_mean = _fmean_or_none(sortinos)
 
     success_prob: float | None
     if resolved_targets.success_target_wealth is None or not terminals:

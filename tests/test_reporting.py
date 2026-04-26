@@ -200,3 +200,56 @@ def test_position_history_includes_trade_dates_between_monthly_steps():
     reported_dates = sorted(set(positions["date"].to_list()))
 
     assert reported_dates == [date(2026, 1, 1), date(2026, 1, 15), date(2026, 2, 1)]
+
+
+def test_validate_reporting_frequency_accepts_choices():
+    assert r.validate_reporting_frequency("daily") == "daily"
+    assert r.validate_reporting_frequency("weekly") == "weekly"
+    assert r.validate_reporting_frequency("monthly") == "monthly"
+
+
+def test_validate_reporting_frequency_rejects_unknown():
+    import pytest
+
+    with pytest.raises(ValueError, match="daily, weekly, monthly"):
+        r.validate_reporting_frequency("quarterly")  # type: ignore[arg-type]
+
+
+def test_total_value_series_aligns_with_value_history_total():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [d.Price(date(2026, 1, 3), 10.0), d.Price(date(2026, 1, 4), 11.0)],
+                [],
+            ),
+            "B": h.SecurityHistory(
+                "B",
+                [d.Price(date(2026, 1, 3), 20.0), d.Price(date(2026, 1, 4), 19.0)],
+                [],
+            ),
+        }
+    )
+    portfolios = [
+        p.Portfolio(
+            date(2026, 1, 3),
+            [
+                p.Holding("A", date(2026, 1, 1), 9.0, 2.0),
+                p.Holding("B", date(2026, 1, 1), 19.0, 3.0),
+            ],
+        ),
+        p.Portfolio(
+            date(2026, 1, 4),
+            [
+                p.Holding("A", date(2026, 1, 1), 9.0, 1.0),
+                p.Holding("B", date(2026, 1, 1), 19.0, 4.0),
+            ],
+        ),
+    ]
+    dates, totals = r.total_value_series(portfolios, market_history, "daily")
+    vh = r.value_history(portfolios, market_history, "daily")
+    for as_of, t in zip(dates, totals, strict=True):
+        tot_row = vh.filter(
+            (pl.col("date") == as_of) & (pl.col("ticker") == "_TOTAL")
+        )["valuation"][0]
+        assert t == tot_row
