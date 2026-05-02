@@ -88,12 +88,10 @@ class Portfolio:
         )
 
     def holdings_by_ticker(self) -> dict[Ticker, list[Holding]]:
-        tickers = {holding.ticker for holding in self.holdings}
-
-        return {
-            ticker: [holding for holding in self.holdings if holding.ticker == ticker]
-            for ticker in tickers
-        }
+        out: dict[Ticker, list[Holding]] = {}
+        for holding in self.holdings:
+            out.setdefault(holding.ticker, []).append(holding)
+        return out
 
     def value_by_ticker(
         self, as_of_date: date, prices: MarketHistory
@@ -118,7 +116,9 @@ class Portfolio:
             quantity = sum(
                 holding.quantity for holding in holdings_by_ticker.get(ticker, [])
             )
-            payout = sum(quantity * dividend.adjusted_amount for dividend in ticker_dividends)
+            payout = sum(
+                quantity * dividend.adjusted_amount for dividend in ticker_dividends
+            )
             payouts[ticker] = payout
 
         return payouts
@@ -156,7 +156,9 @@ class Portfolio:
                 if remainder:
                     remaining_holdings.append(remainder)
 
-        return PortfolioTransition(Portfolio(trade_date, remaining_holdings), new_trades)
+        return PortfolioTransition(
+            Portfolio(trade_date, remaining_holdings), new_trades
+        )
 
     def buy(
         self,
@@ -194,4 +196,6 @@ class PortfolioTransition:
     trades: list[Trade] = field(default_factory=list)
 
     def update(self, new_transition: PortfolioTransition) -> PortfolioTransition:
-        return PortfolioTransition(new_transition.portfolio, self.trades + new_transition.trades)
+        return PortfolioTransition(
+            new_transition.portfolio, self.trades + new_transition.trades
+        )

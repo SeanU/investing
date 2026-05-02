@@ -5,6 +5,11 @@ from datetime import date
 from . import data
 
 
+# Payment date -> tickers that pay on that date -> dividend rows (same ticker may
+# appear once per payment date with a merged list).
+_DividendByDate = dict[date, dict[data.Ticker, list[data.Dividend]]]
+
+
 @dataclass
 class SecurityHistory:
     ticker: data.Ticker
@@ -16,11 +21,50 @@ class SecurityHistory:
         return max(price.date for price in self.prices)
 
 
+@dataclass(slots=True)
+class DividendCalendar:
+    """Index of all dividends by payment date for O(log n + k) range queries.
+
+    Built once from a market's securities; :meth:`dividends_by_payment_date`
+    slices sorted payment dates with bisect instead of rescanning every
+    security's dividend list.
+    """
+
+    _sorted_payment_dates: list[date]
+    _by_payment_date: _DividendByDate
+
+    @classmethod
+    def from_securities(
+        cls, securities: dict[data.Ticker, SecurityHistory]
+    ) -> DividendCalendar:
+        by_date: _DividendByDate = {}
+        for ticker, security in securities.items():
+            for dividend in security.dividends:
+                payment = dividend.payment_date
+                by_date.setdefault(payment, {}).setdefault(ticker, []).append(dividend)
+        sorted_dates = sorted(by_date.keys())
+        return cls(sorted_dates, by_date)
+
+    def dividends_by_payment_date(
+        self, from_date_exclusive: date, to_date_inclusive: date
+    ) -> dict[date, dict[data.Ticker, list[data.Dividend]]]:
+        if not self._sorted_payment_dates:
+            return {}
+        lo = bisect_right(self._sorted_payment_dates, from_date_exclusive)
+        hi = bisect_right(self._sorted_payment_dates, to_date_inclusive)
+        dates = self._sorted_payment_dates
+        by_date = self._by_payment_date
+        return {dates[i]: by_date[dates[i]] for i in range(lo, hi)}
+
+
 @dataclass
 class MarketHistory:
     securities: dict[data.Ticker, SecurityHistory]
     _price_index: dict[data.Ticker, tuple[list[date], list[float]]] = field(
         default_factory=dict, init=False, repr=False
+    )
+    _dividend_calendar: DividendCalendar | None = field(
+        default=None, init=False, repr=False
     )
 
     @property
@@ -46,6 +90,12 @@ class MarketHistory:
             raise IndexError("No price available at or before requested date")
         return prices[idx]
 
+    def _ensure_dividend_calendar(self) -> DividendCalendar:
+        """Return the dividend index, building and caching it if needed."""
+        if self._dividend_calendar is None:
+            self._dividend_calendar = DividendCalendar.from_securities(self.securities)
+        return self._dividend_calendar
+
     def get_dividends_by_ticker(
         self, from_date_exclusive: date, to_date_inclusive: date
     ) -> dict[data.Ticker, list[data.Dividend]]:
@@ -61,26 +111,9 @@ class MarketHistory:
     def get_dividends_by_payment_date(
         self, from_date_exclusive: date, to_date_inclusive: date
     ) -> dict[date, dict[data.Ticker, list[data.Dividend]]]:
-        payment_dates = sorted(
-            {
-                dividend.payment_date
-                for security in self.securities.values()
-                for dividend in security.dividends
-                if from_date_exclusive < dividend.payment_date <= to_date_inclusive
-            }
+        return self._ensure_dividend_calendar().dividends_by_payment_date(
+            from_date_exclusive, to_date_inclusive
         )
-
-        return {
-            payment_date: {
-                ticker: [
-                    dividend
-                    for dividend in security.dividends
-                    if dividend.payment_date == payment_date
-                ]
-                for ticker, security in self.securities.items()
-            }
-            for payment_date in payment_dates
-        }
 
 
 def load_market_history(price_path: str, dividend_path: str) -> MarketHistory:
