@@ -11,6 +11,7 @@ wheels/
 
 .vscode/
 data/
+output/
 # Config: ignore by default; allow *.example.json templates to be tracked
 config/**
 !config/**/
