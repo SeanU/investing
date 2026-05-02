@@ -18,11 +18,11 @@ uv sync
 Create Google Sheets and export `.xlsx` files:
 
 ```bash
-uv run investing-sheets create config/market_data.example.json
-uv run investing-sheets export config/market_data.example.json
+uv run investing-sheets create market_data.example
+uv run investing-sheets export market_data.example
 ```
 
-Note: `config/market_data.example.json` is an example template; copy it to your own config file before real use.
+Each command loads `config/portfolios/<NAME>.json`. The repo includes `market_data.example` as a template; copy that file to a new stem under `config/portfolios/` before real use.
 
 Populate blank instrument names in CSV:
 

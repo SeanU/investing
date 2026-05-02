@@ -13,7 +13,27 @@ from pathlib import Path
 from typing import Any
 
 # Google Sheets worksheet titles cannot contain: \ / ? * [ ]
-_INVALID_TAB_CHARS = re.compile(r'[\\/?*\[\]:]')
+_INVALID_TAB_CHARS = re.compile(r"[\\/?*\[\]:]")
+
+PORTFOLIOS_CONFIG_DIR = Path("config/portfolios")
+
+
+def portfolio_config_path(config_root: str) -> Path:
+    """Path to ``config/portfolios/<config_root>.json`` (relative to the process cwd).
+
+    *config_root* is the basename without ``.json`` (e.g. ``market_data.example``).
+    """
+    name = config_root.strip()
+    if not name:
+        raise ValueError("Config name must be non-empty.")
+    if name in (".", ".."):
+        raise ValueError("Invalid config name.")
+    if "/" in name or "\\" in name:
+        raise ValueError("Config name must not contain path separators.")
+    filename = f"{name}.json"
+    if Path(filename).name != filename:
+        raise ValueError("Invalid config name.")
+    return PORTFOLIOS_CONFIG_DIR / filename
 
 
 @dataclass(frozen=True)
@@ -58,7 +78,9 @@ class MarketDataConfig:
             raise ValueError("config.price_history must be an object.")
         from_raw = ph.get("from")
         if not isinstance(from_raw, str) or not from_raw.strip():
-            raise ValueError("config.price_history.from must be a non-empty date string (YYYY-MM-DD).")
+            raise ValueError(
+                "config.price_history.from must be a non-empty date string (YYYY-MM-DD)."
+            )
         try:
             date.fromisoformat(from_raw.strip())
         except ValueError as e:
@@ -176,7 +198,7 @@ def ensure_export_ready(cfg: MarketDataConfig) -> tuple[str, str]:
     if not d or not p:
         raise SystemExit(
             "Config is missing google_sheets spreadsheet IDs. Run "
-            "`uv run investing-sheets create CONFIG` first, then open each workbook and "
-            "use Dividend Data Refresh before export."
+            "`uv run investing-sheets create NAME` first (loads config/portfolios/NAME.json), "
+            "then open each workbook and use Dividend Data Refresh before export."
         )
     return d, p

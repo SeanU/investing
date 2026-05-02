@@ -6,7 +6,18 @@ import argparse
 from pathlib import Path
 
 from investing.sheets_api import get_credentials, run_create, run_export
-from investing.sheets_config import ensure_create_allowed, load_config
+from investing.sheets_config import (
+    ensure_create_allowed,
+    load_config,
+    portfolio_config_path,
+)
+
+
+def _config_root_arg(value: str) -> Path:
+    try:
+        return portfolio_config_path(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from e
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -28,11 +39,25 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="command", required=True)
 
-    c = sub.add_parser("create", help="Create two spreadsheets and write google_sheets into config")
-    c.add_argument("config", type=Path, help="Path to market data JSON config")
+    c = sub.add_parser(
+        "create", help="Create two spreadsheets and write google_sheets into config"
+    )
+    c.add_argument(
+        "config",
+        metavar="NAME",
+        type=_config_root_arg,
+        help="Config stem: reads and updates config/portfolios/NAME.json",
+    )
 
-    e = sub.add_parser("export", help="Export spreadsheets from config to Excel under data/")
-    e.add_argument("config", type=Path, help="Path to market data JSON config")
+    e = sub.add_parser(
+        "export", help="Export spreadsheets from config to Excel under data/"
+    )
+    e.add_argument(
+        "config",
+        metavar="NAME",
+        type=_config_root_arg,
+        help="Config stem: reads config/portfolios/NAME.json",
+    )
     e.add_argument(
         "--data-dir",
         type=Path,

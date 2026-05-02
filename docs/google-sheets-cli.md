@@ -59,7 +59,7 @@ After a successful **`create`**, the tool appends:
 
 ### Example (before `create`)
 
-See [`config/market_data.example.json`](../config/market_data.example.json).
+See [`config/portfolios/market_data.example.json`](../config/portfolios/market_data.example.json).
 
 ### Example (after `create`)
 
@@ -82,7 +82,7 @@ See [`config/market_data.example.json`](../config/market_data.example.json).
 
 ### Spreadsheet **file** titles in Google Drive
 
-If your config file is `config/market_data.json`, the **stem** is `market_data`. The tool creates:
+Configs live under **`config/portfolios/`** as `<NAME>.json`. The **stem** (spreadsheet title prefix) is `NAME` without `.json`. For example, with `config/portfolios/market_data.json`, the stem is `market_data`. The tool creates:
 
 - **`market_data dividends`**
 - **`market_data prices`**
@@ -100,13 +100,15 @@ uv sync
 ### Create spreadsheets
 
 ```bash
-uv run investing-sheets create path/to/your_config.json
+uv run investing-sheets create your_config_stem
 ```
+
+This reads and updates **`config/portfolios/your_config_stem.json`** (no path override).
 
 Optional:
 
 ```bash
-uv run investing-sheets --credentials C:\path\to\client_secret.json --token C:\path\to\token.json create path\to\your_config.json
+uv run investing-sheets --credentials C:\path\to\client_secret.json --token C:\path\to\token.json create your_config_stem
 ```
 
 **Behavior:**
@@ -123,7 +125,7 @@ See the [Dividend Data Spreadsheet Docs](https://github.com/divdatdev/Dividend-D
 ### Export to Excel
 
 ```bash
-uv run investing-sheets export path/to/your_config.json
+uv run investing-sheets export your_config_stem
 ```
 
 Writes:
@@ -131,10 +133,10 @@ Writes:
 - `data/{stem}-dividends.xlsx`
 - `data/{stem}-prices.xlsx`
 
-where `{stem}` is the config filename without extension. Override the output directory:
+where `{stem}` is the config **NAME** (same as the JSON basename). Override the output directory:
 
 ```bash
-uv run investing-sheets export path/to/your_config.json --data-dir path/to/output_dir
+uv run investing-sheets export your_config_stem --data-dir path/to/output_dir
 ```
 
 `export` requires a populated `google_sheets` section (run **`create`** first).
@@ -142,10 +144,10 @@ uv run investing-sheets export path/to/your_config.json --data-dir path/to/outpu
 ## 5. End-to-end checklist
 
 1. Enable APIs and create **Desktop** OAuth client; place secrets where the CLI can find them (`credentials.json` or `GOOGLE_OAUTH_CREDENTIALS`).
-2. Copy [`config/market_data.example.json`](../config/market_data.example.json) to your own path and edit `tickers` and `price_history.from`.
-3. Run **`investing-sheets create`** with that config path; confirm `google_sheets` was written into the file.
+2. Copy [`config/portfolios/market_data.example.json`](../config/portfolios/market_data.example.json) to a new file under `config/portfolios/` (new stem) and edit `tickers` and `price_history.from`.
+3. Run **`investing-sheets create`** with that stem (`NAME`); confirm `google_sheets` was written into `config/portfolios/NAME.json`.
 4. Open both URLs from the config (or from Google Drive); install/use Dividend Data; **Refresh** both workbooks.
-5. Run **`investing-sheets export`**; load the xlsx files with [`load_dividends` / `load_prices`](../src/investing/data.py) as usual.
+5. Run **`investing-sheets export`** with the same **NAME**; load the xlsx files with [`load_dividends` / `load_prices`](../src/investing/data.py) as usual.
 
 ## 6. Formula compatibility with `data.py`
 

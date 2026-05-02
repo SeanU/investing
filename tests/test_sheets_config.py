@@ -5,10 +5,12 @@ import pytest
 
 from investing.sheets_api import _dividend_formula, _quote_formula
 from investing.sheets_config import (
+    PORTFOLIOS_CONFIG_DIR,
     ensure_create_allowed,
     ensure_export_ready,
     load_config,
     merge_google_sheets_into_raw,
+    portfolio_config_path,
     save_config_atomic,
     spreadsheet_edit_url,
 )
@@ -19,6 +21,25 @@ def test_spreadsheet_edit_url():
         spreadsheet_edit_url("abc123")
         == "https://docs.google.com/spreadsheets/d/abc123/edit"
     )
+
+
+def test_portfolio_config_path():
+    assert (
+        portfolio_config_path("market_data.example")
+        == PORTFOLIOS_CONFIG_DIR / "market_data.example.json"
+    )
+    assert (
+        portfolio_config_path(" 5-way_og ") == PORTFOLIOS_CONFIG_DIR / "5-way_og.json"
+    )
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["", " ", ".", "..", "a/b", "a\\b", "x/../y"],
+)
+def test_portfolio_config_path_rejects_invalid_names(bad: str):
+    with pytest.raises(ValueError):
+        portfolio_config_path(bad)
 
 
 def test_load_minimal_config(tmp_path: Path):
