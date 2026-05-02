@@ -12,12 +12,31 @@ import pytest
 from investing import simulate_cli
 from investing.portfolio import AssetAllocation
 from investing.simulate_cli import (
+    SIMULATIONS_CONFIG_DIR,
     StrategyConfig,
     RebalancingConfig,
     build_strategy,
     load_simulation_config,
+    simulation_config_path,
 )
 from investing.simulation import AnnualRebalance, BuyAndHold
+
+
+def test_simulation_config_path():
+    assert (
+        simulation_config_path("simulation.example")
+        == SIMULATIONS_CONFIG_DIR / "simulation.example.json"
+    )
+    assert simulation_config_path("  my_run ") == SIMULATIONS_CONFIG_DIR / "my_run.json"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["", " ", ".", "..", "a/b", "a\\b", "x/../y"],
+)
+def test_simulation_config_path_rejects_invalid_names(bad: str):
+    with pytest.raises(ValueError):
+        simulation_config_path(bad)
 
 
 _VALID_RAW: dict[str, Any] = {

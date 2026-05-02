@@ -30,6 +30,33 @@ from investing.simulation import (
     simulate_many,
 )
 
+SIMULATIONS_CONFIG_DIR = Path("config/simulations")
+
+
+def simulation_config_path(config_root: str) -> Path:
+    """Path to ``config/simulations/<config_root>.json`` (relative to the process cwd).
+
+    *config_root* is the basename without ``.json`` (e.g. ``simulation.example``).
+    """
+    name = config_root.strip()
+    if not name:
+        raise ValueError("Config name must be non-empty.")
+    if name in (".", ".."):
+        raise ValueError("Invalid config name.")
+    if "/" in name or "\\" in name:
+        raise ValueError("Config name must not contain path separators.")
+    filename = f"{name}.json"
+    if Path(filename).name != filename:
+        raise ValueError("Invalid config name.")
+    return SIMULATIONS_CONFIG_DIR / filename
+
+
+def _simulation_config_root_arg(value: str) -> Path:
+    try:
+        return simulation_config_path(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from e
+
 
 RebalancingType = Literal["annual", "buy_and_hold"]
 
@@ -525,7 +552,12 @@ def _parser() -> argparse.ArgumentParser:
             "to Parquet under output/<config_stem>/."
         )
     )
-    p.add_argument("config", type=Path, help="Path to simulation JSON config")
+    p.add_argument(
+        "config",
+        metavar="NAME",
+        type=_simulation_config_root_arg,
+        help="Config stem: reads config/simulations/NAME.json",
+    )
     return p
 
 
