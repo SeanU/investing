@@ -70,46 +70,6 @@ def test_simulate_builds_starting_portfolio_from_target_allocation():
         assert values_by_ticker[ticker] == pytest.approx(20_000.0)
 
 
-def test_annual_rebalance_keeps_total_value_constant_during_reallocation():
-    """Given: a date where allocation drift exceeds max_deviation and rebalance occurs.
-
-    Example input:
-      - portfolio with clear over/under allocation
-      - current_date where rebalance is triggered
-
-    Expected output:
-      - Rebalanced portfolio has same total_value as pre-rebalance portfolio
-      - Holdings composition changes toward target weights
-    """
-    strategy = AnnualRebalance(
-        AssetAllocation([HoldingTarget("A", 1), HoldingTarget("B", 1)]),
-        0.05,
-    )
-    market_history = h.MarketHistory(
-        {
-            "A": h.SecurityHistory("A", [d.Price(date(2026, 1, 1), 10.0)], []),
-            "B": h.SecurityHistory("B", [d.Price(date(2026, 1, 1), 10.0)], []),
-        }
-    )
-    portfolio = p.Portfolio(
-        date(2026, 1, 1),
-        [
-            p.Holding("A", date(2026, 1, 1), 10.0, 7.0),
-            p.Holding("B", date(2026, 1, 1), 10.0, 3.0),
-        ],
-    )
-
-    transition = strategy.rebalance(portfolio, market_history, date(2026, 1, 1))
-    rebalanced = transition.portfolio
-    rebalanced_values = rebalanced.value_by_ticker(date(2026, 1, 1), market_history)
-
-    assert rebalanced.total_value(date(2026, 1, 1), market_history) == pytest.approx(
-        portfolio.total_value(date(2026, 1, 1), market_history)
-    )
-    assert rebalanced_values["A"] == pytest.approx(50.0)
-    assert rebalanced_values["B"] == pytest.approx(50.0)
-
-
 class _NeverTradeStrategy(Strategy):
     def next_rebalance(self, current_date: date) -> date:
         return date.max
