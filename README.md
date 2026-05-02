@@ -35,7 +35,7 @@ uv run investing-instruments populate-missing-names
 Run many randomized simulations (shared random start dates across strategies) from a JSON config:
 
 ```bash
-uv run investing-simulate config/simulation.example.json
+uv run investing-simulate config/simulations/simulation.example.json
 ```
 
 The config names a **market data basename** (for example `market_data.example`). The CLI loads `data/<basename>-prices.xlsx` and `data/<basename>-dividends.xlsx` from the current working directory. It also sets `num_simulations`, `years` (horizon), `starting_value`, a required `seed`, and a `strategies` list. Each strategy has a `name`, an `allocation` of ticker → positive integer weights, and `rebalancing`: either `{ "type": "buy_and_hold" }` or `{ "type": "annual", "max_deviation": <number> }` (threshold only applies to annual rebalancing).

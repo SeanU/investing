@@ -1,0 +1,30 @@
+{
+  "market_data": "market_data.example",
+  "num_simulations": 200,
+  "years": 30,
+  "starting_value": 100000,
+  "seed": 42,
+  "strategies": [
+    {
+      "name": "60/40 Annual Rebalance",
+      "allocation": {
+        "VTSAX": 60,
+        "VBTLX": 40
+      },
+      "rebalancing": {
+        "type": "annual",
+        "max_deviation": 0.05
+      }
+    },
+    {
+      "name": "70/30 Buy and Hold",
+      "allocation": {
+        "VTSAX": 70,
+        "VBTLX": 30
+      },
+      "rebalancing": {
+        "type": "buy_and_hold"
+      }
+    }
+  ]
+}

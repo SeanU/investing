@@ -11,7 +11,10 @@ wheels/
 
 .vscode/
 data/
-config/
+# Config: ignore by default; allow *.example.json templates to be tracked
+config/**
+!config/**/
+!config/**/*.example.json
 
 # Google Sheets CLI OAuth (local only)
 .google-sheets-token.json
