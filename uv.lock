@@ -606,6 +606,7 @@ dependencies = [
     { name = "google-api-python-client" },
     { name = "google-auth-oauthlib" },
     { name = "polars" },
+    { name = "seaborn" },
     { name = "tqdm" },
 ]
 
@@ -614,7 +615,6 @@ dev = [
     { name = "jupyterlab" },
     { name = "pyarrow" },
     { name = "pytest" },
-    { name = "seaborn" },
 ]
 
 [package.metadata]
@@ -623,6 +623,7 @@ requires-dist = [
     { name = "google-api-python-client", specifier = ">=2.160.0" },
     { name = "google-auth-oauthlib", specifier = ">=1.2.0" },
     { name = "polars", specifier = ">=1.39.3" },
+    { name = "seaborn", specifier = ">=0.13.2" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]
 
@@ -631,7 +632,6 @@ dev = [
     { name = "jupyterlab", specifier = ">=4.5.6" },
     { name = "pyarrow", specifier = ">=23.0.1" },
     { name = "pytest", specifier = ">=9.0.3" },
-    { name = "seaborn", specifier = ">=0.13.2" },
 ]
 
 [[package]]
