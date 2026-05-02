@@ -122,6 +122,7 @@ class TestAnnualRebalance:
                 "A": h.SecurityHistory("A", [d.Price(date(2026, 1, 1), 1.0)], []),
                 "B": h.SecurityHistory("B", [d.Price(date(2026, 1, 1), 1.0)], []),
                 "C": h.SecurityHistory("C", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "D": h.SecurityHistory("D", [d.Price(date(2026, 1, 1), 1.0)], []),
             }
         )
         portfolio = p.Portfolio(
@@ -141,3 +142,159 @@ class TestAnnualRebalance:
         ) == pytest.approx(90.0)
         for ticker in ("A", "B", "C"):
             assert values[ticker] == pytest.approx(30.0)
+
+    def test_rebalance_converges_for_three_asset_underweight(self):
+        """Underweight names are topped up when another leg is materially overweight."""
+        strategy = AnnualRebalance(
+            AssetAllocation(
+                [
+                    HoldingTarget("A", 1),
+                    HoldingTarget("B", 1),
+                    HoldingTarget("C", 1),
+                ]
+            ),
+            max_deviation=0.05,
+        )
+        market_history = h.MarketHistory(
+            {
+                "A": h.SecurityHistory("A", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "B": h.SecurityHistory("B", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "C": h.SecurityHistory("C", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "D": h.SecurityHistory("D", [d.Price(date(2026, 1, 1), 1.0)], []),
+            }
+        )
+        portfolio = p.Portfolio(
+            date(2026, 1, 1),
+            [
+                p.Holding("A", date(2026, 1, 1), 1.0, 9.0),
+                p.Holding("B", date(2026, 1, 1), 1.0, 9.0),
+                p.Holding("C", date(2026, 1, 1), 1.0, 72.0),
+            ],
+        )
+
+        transition = strategy.rebalance(portfolio, market_history, date(2026, 1, 1))
+        values = transition.portfolio.value_by_ticker(date(2026, 1, 1), market_history)
+
+        assert transition.portfolio.total_value(
+            date(2026, 1, 1), market_history
+        ) == pytest.approx(90.0)
+        for ticker in ("A", "B", "C"):
+            assert values[ticker] == pytest.approx(30.0)
+
+    def test_rebalance_with_two_overweighted(self):
+        """Ensure rebalance only buys underweighted assets."""
+        strategy = AnnualRebalance(
+            AssetAllocation(
+                [
+                    HoldingTarget("A", 1),
+                    HoldingTarget("B", 1),
+                    HoldingTarget("C", 1),
+                    HoldingTarget("D", 1),
+                ]
+            ),
+            max_deviation=0.05,
+        )
+        market_history = h.MarketHistory(
+            {
+                "A": h.SecurityHistory("A", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "B": h.SecurityHistory("B", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "C": h.SecurityHistory("C", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "D": h.SecurityHistory("D", [d.Price(date(2026, 1, 1), 1.0)], []),
+            }
+        )
+        portfolio = p.Portfolio(
+            date(2026, 1, 1),
+            [
+                p.Holding("A", date(2026, 1, 1), 1.0, 31),
+                p.Holding("B", date(2026, 1, 1), 1.0, 29),
+                p.Holding("C", date(2026, 1, 1), 1.0, 21),
+                p.Holding("D", date(2026, 1, 1), 1.0, 19),
+            ],
+        )
+
+        transition = strategy.rebalance(portfolio, market_history, date(2026, 1, 1))
+        values = transition.portfolio.value_by_ticker(date(2026, 1, 1), market_history)
+
+        assert values["A"] == pytest.approx(25)
+        assert values["B"] == pytest.approx(29)
+        assert values["C"] == pytest.approx(23.4)
+        assert values["D"] == pytest.approx(22.6)
+
+    def test_rebalance_restores_equal_weights_when_only_underallocation_triggers(self):
+        """No leg is over the band, but one name is far enough under to require buys."""
+        strategy = AnnualRebalance(
+            AssetAllocation(
+                [
+                    HoldingTarget("A", 1),
+                    HoldingTarget("B", 1),
+                    HoldingTarget("C", 1),
+                    HoldingTarget("D", 1),
+                ]
+            ),
+            max_deviation=0.05,
+        )
+        market_history = h.MarketHistory(
+            {
+                "A": h.SecurityHistory("A", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "B": h.SecurityHistory("B", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "C": h.SecurityHistory("C", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "D": h.SecurityHistory("D", [d.Price(date(2026, 1, 1), 1.0)], []),
+            }
+        )
+        portfolio = p.Portfolio(
+            date(2026, 1, 1),
+            [
+                p.Holding("A", date(2026, 1, 1), 1.0, 30.0),
+                p.Holding("B", date(2026, 1, 1), 1.0, 60.0),
+                p.Holding("C", date(2026, 1, 1), 1.0, 55.0),
+                p.Holding("D", date(2026, 1, 1), 1.0, 55.0),
+            ],
+        )
+
+        transition = strategy.rebalance(portfolio, market_history, date(2026, 1, 1))
+        values = transition.portfolio.value_by_ticker(date(2026, 1, 1), market_history)
+
+        assert transition.portfolio.total_value(
+            date(2026, 1, 1), market_history
+        ) == pytest.approx(200.0)
+        for ticker in ("A", "B", "C", "D"):
+            assert values[ticker] == pytest.approx(50.0)
+
+    def test_rebalance_with_two_underweighted(self):
+        """Ensure rebalance only sells overweight names when funding underweights."""
+        strategy = AnnualRebalance(
+            AssetAllocation(
+                [
+                    HoldingTarget("A", 1),
+                    HoldingTarget("B", 1),
+                    HoldingTarget("C", 1),
+                    HoldingTarget("D", 1),
+                ]
+            ),
+            max_deviation=0.05,
+        )
+        market_history = h.MarketHistory(
+            {
+                "A": h.SecurityHistory("A", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "B": h.SecurityHistory("B", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "C": h.SecurityHistory("C", [d.Price(date(2026, 1, 1), 1.0)], []),
+                "D": h.SecurityHistory("D", [d.Price(date(2026, 1, 1), 1.0)], []),
+            }
+        )
+        portfolio = p.Portfolio(
+            date(2026, 1, 1),
+            [
+                p.Holding("A", date(2026, 1, 1), 1.0, 19),
+                p.Holding("B", date(2026, 1, 1), 1.0, 21),
+                p.Holding("C", date(2026, 1, 1), 1.0, 29),
+                p.Holding("D", date(2026, 1, 1), 1.0, 31),
+            ],
+        )
+
+        transition = strategy.rebalance(portfolio, market_history, date(2026, 1, 1))
+        values = transition.portfolio.value_by_ticker(date(2026, 1, 1), market_history)
+
+        assert values["A"] == pytest.approx(22.6)
+        assert values["B"] == pytest.approx(23.4)
+        assert values["C"] == pytest.approx(29)
+        assert values["D"] == pytest.approx(25)
