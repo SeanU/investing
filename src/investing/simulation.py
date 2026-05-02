@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import calendar
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -12,7 +13,13 @@ from investing.metrics import (
     aggregate_simulation_metrics,
     compute_simulation_metrics,
 )
-from investing.portfolio import AssetAllocation, Holding, Portfolio, PortfolioTransition, Trade
+from investing.portfolio import (
+    AssetAllocation,
+    Holding,
+    Portfolio,
+    PortfolioTransition,
+    Trade,
+)
 
 
 @dataclass
@@ -100,7 +107,10 @@ class AnnualRebalance(Strategy):
         self.max_deviation = max_deviation
 
     def next_rebalance(self, current_date: date) -> date:
-        return date(current_date.year + 1, current_date.month, current_date.day)
+        y = current_date.year + 1
+        m = current_date.month
+        last = calendar.monthrange(y, m)[1]
+        return date(y, m, min(current_date.day, last))
 
     @staticmethod
     def _assert_value_preserved(value_before: float, value_after: float) -> None:
@@ -135,9 +145,7 @@ class AnnualRebalance(Strategy):
             undervalue_prorating = proportion / total_undervaluation
             buy_amount = undervalue_prorating * sell_amount
             transition = transition.update(
-                transition.portfolio.buy(
-                    buy_ticker, buy_amount, current_date, history
-                )
+                transition.portfolio.buy(buy_ticker, buy_amount, current_date, history)
             )
 
         value_before = portfolio.total_value(current_date, history)
@@ -188,7 +196,9 @@ class AnnualRebalance(Strategy):
     ) -> PortfolioTransition:
         value_proportions = {
             ticker: value / portfolio.total_value(current_date, history)
-            for ticker, value in portfolio.value_by_ticker(current_date, history).items()
+            for ticker, value in portfolio.value_by_ticker(
+                current_date, history
+            ).items()
         }
         for ticker, proportion in value_proportions.items():
             overallocation = proportion - self.allocation.proportions[ticker]
@@ -213,7 +223,9 @@ class AnnualRebalance(Strategy):
     ) -> PortfolioTransition:
         value_proportions = {
             ticker: value / portfolio.total_value(current_date, history)
-            for ticker, value in portfolio.value_by_ticker(current_date, history).items()
+            for ticker, value in portfolio.value_by_ticker(
+                current_date, history
+            ).items()
         }
         for ticker, proportion in value_proportions.items():
             underallocation = self.allocation.proportions[ticker] - proportion
@@ -417,9 +429,7 @@ def _random_start_dates(
     ]
 
 
-def _strategy_label(
-    strategy: Strategy, index: int, existing: set[str]
-) -> str:
+def _strategy_label(strategy: Strategy, index: int, existing: set[str]) -> str:
     base_label = strategy.__class__.__name__
     if base_label not in existing:
         return base_label

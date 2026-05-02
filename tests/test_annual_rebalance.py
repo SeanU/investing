@@ -20,6 +20,15 @@ class TestAnnualRebalance:
         )
         assert strategy.next_rebalance(date(2024, 6, 15)) == date(2025, 6, 15)
 
+    def test_next_rebalance_leap_day_non_leap_year(self):
+        """Feb 29 + 1 year uses the last valid day in February when needed."""
+        strategy = AnnualRebalance(
+            AssetAllocation([HoldingTarget("A", 1), HoldingTarget("B", 1)]),
+            max_deviation=0.05,
+        )
+        assert strategy.next_rebalance(date(2016, 2, 29)) == date(2017, 2, 28)
+        assert strategy.next_rebalance(date(2024, 2, 29)) == date(2025, 2, 28)
+
     def test_rebalance_preserves_total_value(self):
         """Rebalance moves holdings toward targets without changing NAV."""
         strategy = AnnualRebalance(
