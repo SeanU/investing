@@ -1,4 +1,5 @@
 from datetime import date
+import io
 
 import pytest
 
@@ -12,8 +13,11 @@ from investing.simulation import (
     BuyAndHold,
     MultiStrategySimulationResult,
     Strategy,
+    first_available_price,
+    print_simulation_preamble,
     simulate,
     simulate_many,
+    start_date_sampling_bounds,
 )
 
 
@@ -63,7 +67,9 @@ def test_simulate_builds_starting_portfolio_from_target_allocation():
     start_date = date(2022, 1, 1)
 
     assert len(starting_portfolio.holdings) == 5
-    assert starting_portfolio.total_value(start_date, history) == pytest.approx(100_000.0)
+    assert starting_portfolio.total_value(start_date, history) == pytest.approx(
+        100_000.0
+    )
 
     values_by_ticker = starting_portfolio.value_by_ticker(start_date, history)
     for ticker in history.securities.keys():
@@ -543,6 +549,89 @@ def test_simulate_many_applies_plan_target_return_to_metrics():
         assert run_metric.success_probability is not None
 
 
+def test_first_available_price_returns_earliest_quote_even_when_unsorted():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 2, 1), 11.0),
+                    d.Price(date(2026, 1, 1), 10.0),
+                ],
+                [],
+            )
+        }
+    )
+    on_date, price = first_available_price(market_history, "A")
+    assert on_date == date(2026, 1, 1)
+    assert price == 10.0
+
+
+def test_start_date_sampling_bounds_align_with_simulate_many_window():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2027, 1, 1), 11.0),
+                    d.Price(date(2028, 12, 31), 12.0),
+                ],
+                [],
+            ),
+            "B": h.SecurityHistory(
+                "B",
+                [
+                    d.Price(date(2026, 3, 1), 20.0),
+                    d.Price(date(2027, 3, 1), 21.0),
+                    d.Price(date(2028, 12, 31), 22.0),
+                ],
+                [],
+            ),
+        }
+    )
+    strategy = BuyAndHold(
+        AssetAllocation([HoldingTarget("A", 1), HoldingTarget("B", 1)])
+    )
+    lo, hi = start_date_sampling_bounds(market_history, [strategy], years=1)
+    assert lo == date(2026, 3, 1)
+    assert hi == date(2027, 12, 31)
+
+
+def test_print_simulation_preamble_includes_prices_and_sampling_range():
+    market_history = h.MarketHistory(
+        {
+            "Z": h.SecurityHistory(
+                "Z",
+                [
+                    d.Price(date(2026, 1, 5), 1.25),
+                    d.Price(date(2028, 12, 31), 2.0),
+                ],
+                [],
+            ),
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2028, 12, 31), 11.0),
+                ],
+                [],
+            ),
+        }
+    )
+    strategy = BuyAndHold(
+        AssetAllocation([HoldingTarget("A", 1), HoldingTarget("Z", 1)])
+    )
+    buf = io.StringIO()
+    print_simulation_preamble(market_history, [strategy], years=1, file=buf)
+    text = buf.getvalue()
+    assert "Securities (earliest available price):" in text
+    assert "  A: 2026-01-01 @ 10" in text
+    assert "  Z: 2026-01-05 @ 1.25" in text
+    assert "Start dates are sampled uniformly" in text
+    assert "2026-01-05 through 2027-12-31" in text
+
+
 def test_simulate_many_respects_start_window_and_horizon():
     market_history = h.MarketHistory(
         {
@@ -566,7 +655,9 @@ def test_simulate_many_respects_start_window_and_horizon():
             ),
         }
     )
-    strategy = BuyAndHold(AssetAllocation([HoldingTarget("A", 1), HoldingTarget("B", 1)]))
+    strategy = BuyAndHold(
+        AssetAllocation([HoldingTarget("A", 1), HoldingTarget("B", 1)])
+    )
 
     result = simulate_many(
         strategy=strategy,
@@ -762,8 +853,7 @@ def test_simulate_many_multiple_strategies_reproducible_with_seed():
     assert list(first.by_strategy) == list(second.by_strategy)
     for label in first.by_strategy:
         first_dates = [
-            sim.portfolios[0].as_of_date
-            for sim in first.by_strategy[label].simulations
+            sim.portfolios[0].as_of_date for sim in first.by_strategy[label].simulations
         ]
         second_dates = [
             sim.portfolios[0].as_of_date

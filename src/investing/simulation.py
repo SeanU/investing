@@ -1,10 +1,12 @@
 from abc import ABC, abstractmethod
 import calendar
+import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from math import isclose
 from random import Random
+from typing import TextIO
 
 from investing.data import Ticker
 from investing.history import MarketHistory
@@ -388,6 +390,48 @@ def _strategy_tickers(strategy: Strategy) -> set[Ticker]:
 def _first_price_date(history: MarketHistory, ticker: Ticker) -> date:
     prices = history.securities[ticker].prices
     return min(price.date for price in prices)
+
+
+def first_available_price(history: MarketHistory, ticker: Ticker) -> tuple[date, float]:
+    """Earliest quote date for *ticker* and the price on that date."""
+    prices = history.securities[ticker].prices
+    if not prices:
+        raise ValueError(f"no prices loaded for {ticker!r}")
+    first = min(prices, key=lambda p: p.date)
+    return first.date, first.price
+
+
+def start_date_sampling_bounds(
+    history: MarketHistory, strategies: Sequence[Strategy], years: int
+) -> tuple[date, date]:
+    """Inclusive calendar-date range from which :func:`simulate_many` draws start dates."""
+    return _start_date_bounds(history, strategies, years)
+
+
+def print_simulation_preamble(
+    history: MarketHistory,
+    strategies: Sequence[Strategy],
+    years: int,
+    *,
+    file: TextIO | None = None,
+) -> None:
+    """Print earliest quote per ticker and the random start-date sampling window."""
+    out = sys.stdout if file is None else file
+    tickers = set().union(*(_strategy_tickers(s) for s in strategies))
+    print("Securities (earliest available price):", file=out)
+    for ticker in sorted(tickers):
+        on_date, price = first_available_price(history, ticker)
+        print(f"  {ticker}: {on_date.isoformat()} @ {price:g}", file=out)
+    earliest_start, latest_start = _start_date_bounds(history, strategies, years)
+    span_days = (latest_start - earliest_start).days + 1
+    print(file=out)
+    print(
+        "Start dates are sampled uniformly at random from calendar dates "
+        f"{earliest_start.isoformat()} through {latest_start.isoformat()} inclusive "
+        f"({span_days} days).",
+        file=out,
+    )
+    print(file=out)
 
 
 def _start_date_bounds(

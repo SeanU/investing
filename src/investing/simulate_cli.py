@@ -28,6 +28,7 @@ from investing.simulation import (
     MultiSimulationResult,
     MultiStrategySimulationResult,
     Strategy,
+    print_simulation_preamble,
     simulate_many,
 )
 
@@ -543,6 +544,8 @@ def run(cfg: SimulationConfig) -> None:
 
     history = load_market_history(str(prices_path), str(dividends_path))
     strategies = [build_strategy(s) for s in cfg.strategies]
+
+    print_simulation_preamble(history, strategies, cfg.years)
 
     result = simulate_many(
         strategy=strategies,
