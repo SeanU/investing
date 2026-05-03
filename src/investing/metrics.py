@@ -36,8 +36,12 @@ def _fmean_or_none(values: list[float]) -> float | None:
     return fmean(values) if values else None
 
 
-def _percentile_linear(values: Sequence[float], p: float) -> float | None:
-    """Linear interpolation between closest ranks (common P10/P50/P90)."""
+def percentile_linear(values: Sequence[float], p: float) -> float | None:
+    """Linear interpolation between closest ranks (common P10/P50/P90).
+
+    Matches the percentile definition used when aggregating simulation runs
+    in this module so reports can reuse the same computation.
+    """
     if not values:
         return None
     xs = sorted(values)
@@ -251,9 +255,9 @@ def aggregate_simulation_metrics(
         std_dev_returns=_fmean_or_none(stds),
         sortino_ratio=_fmean_or_none(sortinos),
         success_probability=_fmean_or_none(successes),
-        terminal_wealth_p10=_percentile_linear(terminals, 0.10) if terminals else None,
-        terminal_wealth_p50=_percentile_linear(terminals, 0.50) if terminals else None,
-        terminal_wealth_p90=_percentile_linear(terminals, 0.90) if terminals else None,
+        terminal_wealth_p10=percentile_linear(terminals, 0.10) if terminals else None,
+        terminal_wealth_p50=percentile_linear(terminals, 0.50) if terminals else None,
+        terminal_wealth_p90=percentile_linear(terminals, 0.90) if terminals else None,
         sortino_target_return_used=sortino_target_return_used,
         success_target_wealth_used=success_target_wealth_used,
     )
@@ -357,9 +361,9 @@ def compute_simulation_metrics(
             1 for t in terminals if t >= resolved_targets.success_target_wealth
         ) / len(terminals)
 
-    p10 = _percentile_linear(terminals, 0.10) if terminals else None
-    p50 = _percentile_linear(terminals, 0.50) if terminals else None
-    p90 = _percentile_linear(terminals, 0.90) if terminals else None
+    p10 = percentile_linear(terminals, 0.10) if terminals else None
+    p50 = percentile_linear(terminals, 0.50) if terminals else None
+    p90 = percentile_linear(terminals, 0.90) if terminals else None
 
     return SimulationMetrics(
         cagr=cagr_mean,

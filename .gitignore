@@ -12,6 +12,10 @@ wheels/
 .vscode/
 data/
 output/
+# PDFs and caches under reports/<simulation-name>/ — keep reports/quarto/ in git
+reports/*
+!reports/quarto/
+!reports/quarto/**
 # Config: ignore by default; allow *.example.json templates to be tracked
 config/**
 !config/**/

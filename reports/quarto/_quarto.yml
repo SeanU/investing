@@ -1,0 +1,12 @@
+project:
+  type: default
+
+jupyter: python3
+
+# Use the project venv interpreter when rendering (see README: QUARTO_PYTHON).
+execute:
+  echo: false
+  warning: false
+
+format:
+  typst: default

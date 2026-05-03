@@ -605,7 +605,9 @@ dependencies = [
     { name = "fastexcel" },
     { name = "google-api-python-client" },
     { name = "google-auth-oauthlib" },
+    { name = "ipykernel" },
     { name = "polars" },
+    { name = "pyarrow" },
     { name = "seaborn" },
     { name = "tqdm" },
 ]
@@ -613,7 +615,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "jupyterlab" },
-    { name = "pyarrow" },
     { name = "pytest" },
 ]
 
@@ -622,7 +623,9 @@ requires-dist = [
     { name = "fastexcel", specifier = ">=0.19.0" },
     { name = "google-api-python-client", specifier = ">=2.160.0" },
     { name = "google-auth-oauthlib", specifier = ">=1.2.0" },
+    { name = "ipykernel", specifier = ">=7.0.0" },
     { name = "polars", specifier = ">=1.39.3" },
+    { name = "pyarrow", specifier = ">=23.0.1" },
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]
@@ -630,7 +633,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "jupyterlab", specifier = ">=4.5.6" },
-    { name = "pyarrow", specifier = ">=23.0.1" },
     { name = "pytest", specifier = ">=9.0.3" },
 ]
 

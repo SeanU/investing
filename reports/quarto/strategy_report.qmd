@@ -1,0 +1,265 @@
+---
+title: "Simulation strategy report"
+subtitle: "Monte Carlo summary"
+jupyter: python3
+format: typst
+execute:
+  echo: false
+  warning: false
+  # Same .qmd is rendered once per strategy with different env vars; Quarto must not
+  # reuse frozen Jupyter output from reports/quarto/.quarto/_freeze/ (that caused every
+  # PDF to show the first strategy's numbers while -M title changed).
+  cache: false
+  freeze: false
+# title/subtitle overridden per render via `quarto render -M title=...` from investing-report
+---
+
+```{python}
+#| tags: [parameters]
+
+# <<investing-report-parameters>>
+# For `uv run investing-report`, the CLI replaces the lines between the markers with
+# literal assignments (Quarto's Jupyter process often does not see subprocess env vars).
+import os
+
+output_dir = os.environ.get("INVESTING_REPORT_OUTPUT_DIR", "")
+strategy = os.environ.get("INVESTING_REPORT_STRATEGY", "")
+# <</investing-report-parameters>>
+```
+
+```{python}
+#| output: asis
+
+import json
+import statistics
+from pathlib import Path
+
+import polars as pl
+
+from investing.metrics import percentile_linear
+
+if not output_dir or not strategy:
+    raise SystemExit(
+        "Set INVESTING_REPORT_OUTPUT_DIR and INVESTING_REPORT_STRATEGY "
+        "(normally via `uv run investing-report <CONFIG_STEM>`)."
+    )
+
+out = Path(output_dir)
+cfg_full = json.loads((out / "config.json").read_text(encoding="utf-8"))
+strat_cfg = next((s for s in cfg_full["strategies"] if s["name"] == strategy), None)
+if strat_cfg is None:
+    raise SystemExit(f"Strategy {strategy!r} not found in config.json")
+
+run_m = pl.read_parquet(out / "run_metrics.parquet")
+df = run_m.filter(pl.col("strategy") == strategy)
+agg = pl.read_parquet(out / "aggregate_metrics.parquet").filter(pl.col("strategy") == strategy)
+if agg.height == 0:
+    raise SystemExit("No aggregate_metrics row for this strategy")
+agg_row = agg.row(0, named=True)
+
+
+def fmt_pct(x):
+    if x is None:
+        return "—"
+    return f"{100 * x:.2f}%"
+
+
+def fmt_money(x):
+    if x is None:
+        return "—"
+    return f"${x:,.2f}"
+
+
+def summarize_col(colname):
+    s = df[colname].drop_nulls()
+    vals = [float(v) for v in s.to_list()]
+    n = len(vals)
+    if n == 0:
+        return {
+            "mean": None,
+            "std": None,
+            "p10": None,
+            "p50": None,
+            "p90": None,
+            "n": 0,
+            "vals": [],
+        }
+    mean = statistics.fmean(vals)
+    std = statistics.stdev(vals) if n > 1 else None
+    return {
+        "mean": mean,
+        "std": std,
+        "p10": percentile_linear(vals, 0.10),
+        "p50": percentile_linear(vals, 0.50),
+        "p90": percentile_linear(vals, 0.90),
+        "n": n,
+        "vals": vals,
+    }
+
+
+metrics_spec = [
+    ("final_value", "terminal_wealth_p50", "Final portfolio value"),
+    ("cagr", "cagr", "CAGR (compound annual growth)"),
+    ("sortino", "sortino_ratio", "Sortino ratio"),
+    ("mdd", "max_drawdown", "Maximum drawdown"),
+]
+
+summaries = {key: summarize_col(col) for key, col, _ in metrics_spec}
+
+
+def fmt_cell(metric_key, x):
+    if x is None:
+        return "—"
+    if metric_key == "final_value":
+        return fmt_money(x)
+    if metric_key in ("cagr", "mdd"):
+        return fmt_pct(x)
+    if metric_key == "sortino":
+        return f"{x:.4f}".rstrip("0").rstrip(".") or "0"
+    return str(x)
+
+
+print(f"**Strategy:** {strategy}\n")
+
+print("## Simulation parameters\n")
+print(f"- **Market data**: `{cfg_full['market_data']}`")
+print(f"- **Horizon (years)**: {cfg_full['years']}")
+print(f"- **Number of simulations**: {cfg_full['num_simulations']}")
+print(f"- **Starting value**: {fmt_money(cfg_full['starting_value'])}")
+print(f"- **Seed**: {cfg_full['seed']}")
+print("\n### Planning targets (metrics engine)\n")
+mar = agg_row.get("sortino_target_return_used")
+stw = agg_row.get("success_target_wealth_used")
+if mar is None and stw is None:
+    print("*Planning targets were not used (Sortino MAR / success wealth not set).*")
+else:
+    print(f"- **Sortino MAR (annual)**: {fmt_pct(mar)}")
+    print(f"- **Success wealth threshold**: {fmt_money(stw)}")
+
+print("\n### Strategy definition\n")
+print(f"- **Name**: {strategy}")
+print("- **Allocation**:")
+for t, w in sorted(strat_cfg["allocation"].items()):
+    print(f"  - {t}: {w}")
+rb = strat_cfg["rebalancing"]
+if rb["type"] == "buy_and_hold":
+    print("- **Rebalancing**: buy and hold")
+else:
+    print(f"- **Rebalancing**: annual, max deviation {rb['max_deviation']}")
+
+print("\n## Summary across simulation runs\n")
+print(
+    "*Standard deviation is the sample SD across runs (ddof=1 when n≥2); "
+    "percentiles use `investing.metrics.percentile_linear` (same as the simulation engine).*"
+)
+print()
+hdr = "| Metric | Mean | Std dev | P10 | P50 | P90 |"
+sep = "| --- | --- | --- | --- | --- | --- |"
+lines = [hdr, sep]
+for key, _col, label in metrics_spec:
+    sm = summaries[key]
+    lines.append(
+        "| {label} | {m} | {sd} | {p10} | {p50} | {p90} |".format(
+            label=label,
+            m=fmt_cell(key, sm["mean"]),
+            sd=fmt_cell(key, sm["std"]) if sm["std"] is not None else "—",
+            p10=fmt_cell(key, sm["p10"]),
+            p50=fmt_cell(key, sm["p50"]),
+            p90=fmt_cell(key, sm["p90"]),
+        )
+    )
+print("\n".join(lines))
+
+print("\n## Distributions\n")
+```
+
+```{python}
+#| fig-cap: "Final portfolio value across runs (vertical lines: P10, P50, P90)"
+#| fig-width: 6
+#| fig-height: 3.2
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+sm = summaries["final_value"]
+if sm["n"] == 0:
+    print("*No final portfolio value data.*")
+else:
+    fig, ax = plt.subplots(figsize=(6, 3.2))
+    sns.histplot(sm["vals"], kde=sm["n"] >= 10, ax=ax, stat="density")
+    for v in (sm["p10"], sm["p50"], sm["p90"]):
+        if v is not None:
+            ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
+    ax.set_xlabel("Final value ($)")
+    plt.tight_layout()
+    plt.show()
+```
+
+```{python}
+#| fig-cap: "CAGR across runs (vertical lines: P10, P50, P90)"
+#| fig-width: 6
+#| fig-height: 3.2
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+sm = summaries["cagr"]
+if sm["n"] == 0:
+    print("*No CAGR data.*")
+else:
+    fig, ax = plt.subplots(figsize=(6, 3.2))
+    sns.histplot(sm["vals"], kde=sm["n"] >= 10, ax=ax, stat="density")
+    for v in (sm["p10"], sm["p50"], sm["p90"]):
+        if v is not None:
+            ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
+    ax.set_xlabel("CAGR (fraction)")
+    plt.tight_layout()
+    plt.show()
+```
+
+```{python}
+#| fig-cap: "Sortino ratio across runs (vertical lines: P10, P50, P90)"
+#| fig-width: 6
+#| fig-height: 3.2
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+sm = summaries["sortino"]
+if sm["n"] == 0:
+    print("*No Sortino ratio data.*")
+else:
+    fig, ax = plt.subplots(figsize=(6, 3.2))
+    sns.histplot(sm["vals"], kde=sm["n"] >= 10, ax=ax, stat="density")
+    for v in (sm["p10"], sm["p50"], sm["p90"]):
+        if v is not None:
+            ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
+    ax.set_xlabel("Sortino ratio")
+    plt.tight_layout()
+    plt.show()
+```
+
+```{python}
+#| fig-cap: "Maximum drawdown across runs (vertical lines: P10, P50, P90; negative = loss from peak)"
+#| fig-width: 6
+#| fig-height: 3.2
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+sm = summaries["mdd"]
+if sm["n"] == 0:
+    print("*No maximum drawdown data.*")
+else:
+    fig, ax = plt.subplots(figsize=(6, 3.2))
+    sns.histplot(sm["vals"], kde=sm["n"] >= 10, ax=ax, stat="density")
+    for v in (sm["p10"], sm["p50"], sm["p90"]):
+        if v is not None:
+            ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
+    ax.set_xlabel("Max drawdown (fraction of peak)")
+    plt.tight_layout()
+    plt.show()
+```

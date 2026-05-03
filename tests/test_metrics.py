@@ -6,12 +6,14 @@ from investing import data as d
 from investing import history as h
 from investing import portfolio as p
 from investing.history import MarketHistory
-from investing.metrics import SimulationMetrics, compute_simulation_metrics
+from investing.metrics import (
+    SimulationMetrics,
+    compute_simulation_metrics,
+    percentile_linear,
+)
 
 
-def _mh(
-    ticker: str, prices: list[tuple[date, float]]
-) -> MarketHistory:
+def _mh(ticker: str, prices: list[tuple[date, float]]) -> MarketHistory:
     return h.MarketHistory(
         {
             ticker: h.SecurityHistory(
@@ -27,6 +29,14 @@ def _single_holding_portfolio(
     as_of: date, ticker: str, purchase_price: float, quantity: float
 ) -> p.Portfolio:
     return p.Portfolio(as_of, [p.Holding(ticker, as_of, purchase_price, quantity)])
+
+
+def test_percentile_linear_public_api():
+    assert percentile_linear([], 0.5) is None
+    assert percentile_linear([42.0], 0.5) == pytest.approx(42.0)
+    assert percentile_linear([10.0, 20.0], 0.5) == pytest.approx(15.0)
+    # n=3, p=0.1 -> k=0.2 -> 0.8*0 + 0.2*10
+    assert percentile_linear([0.0, 10.0, 20.0], 0.10) == pytest.approx(2.0)
 
 
 def test_compute_metrics_empty_runs_returns_none_fields():
