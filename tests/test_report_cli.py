@@ -79,7 +79,12 @@ def test_report_cli_exits_when_quarto_missing(tmp_path, monkeypatch):
     (sim_dir / "foo.json").write_text(json.dumps(cfg), encoding="utf-8")
     out = tmp_path / "output" / "foo"
     out.mkdir(parents=True)
-    for name in ("run_metrics.parquet", "aggregate_metrics.parquet", "config.json"):
+    for name in (
+        "run_metrics.parquet",
+        "aggregate_metrics.parquet",
+        "runs.parquet",
+        "config.json",
+    ):
         (out / name).write_bytes(b"")
     monkeypatch.setattr(sys, "argv", ["investing-report", "foo"])
     monkeypatch.setattr("investing.report_cli.which", lambda _x: None)

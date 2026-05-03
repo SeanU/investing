@@ -31,12 +31,17 @@ strategy = os.environ.get("INVESTING_REPORT_STRATEGY", "")
 #| output: asis
 
 import json
+import math
 import statistics
 from pathlib import Path
 
 import polars as pl
 
 from investing.metrics import percentile_linear
+
+
+def _valid_prob(x):
+    return x is not None and not (isinstance(x, float) and math.isnan(x))
 
 if not output_dir or not strategy:
     raise SystemExit(
@@ -49,6 +54,13 @@ cfg_full = json.loads((out / "config.json").read_text(encoding="utf-8"))
 strat_cfg = next((s for s in cfg_full["strategies"] if s["name"] == strategy), None)
 if strat_cfg is None:
     raise SystemExit(f"Strategy {strategy!r} not found in config.json")
+
+runs_tbl = pl.read_parquet(out / "runs.parquet").filter(pl.col("strategy") == strategy)
+if runs_tbl.height == 0:
+    trial_start_earliest = trial_start_latest = None
+else:
+    trial_start_earliest = runs_tbl["start_date"].min()
+    trial_start_latest = runs_tbl["start_date"].max()
 
 run_m = pl.read_parquet(out / "run_metrics.parquet")
 df = run_m.filter(pl.col("strategy") == strategy)
@@ -104,6 +116,18 @@ metrics_spec = [
     ("mdd", "max_drawdown", "Maximum drawdown"),
 ]
 
+has_success_metric = _valid_prob(agg_row.get("success_probability")) or (
+    df.filter(pl.col("success_probability").is_finite()).height > 0
+)
+if has_success_metric:
+    metrics_spec.append(
+        (
+            "success_probability",
+            "success_probability",
+            "Success rate (terminal wealth ≥ threshold)",
+        )
+    )
+
 summaries = {key: summarize_col(col) for key, col, _ in metrics_spec}
 
 
@@ -116,6 +140,8 @@ def fmt_cell(metric_key, x):
         return fmt_pct(x)
     if metric_key == "sortino":
         return f"{x:.4f}".rstrip("0").rstrip(".") or "0"
+    if metric_key == "success_probability":
+        return fmt_pct(x)
     return str(x)
 
 
@@ -125,6 +151,13 @@ print("## Simulation parameters\n")
 print(f"- **Market data**: `{cfg_full['market_data']}`")
 print(f"- **Horizon (years)**: {cfg_full['years']}")
 print(f"- **Number of simulations**: {cfg_full['num_simulations']}")
+if trial_start_earliest is not None and trial_start_latest is not None:
+    print(
+        "- **Trial start dates (earliest / latest)**: "
+        f"{trial_start_earliest.isoformat()} / {trial_start_latest.isoformat()}"
+    )
+else:
+    print("- **Trial start dates (earliest / latest)**: —")
 print(f"- **Starting value**: {fmt_money(cfg_full['starting_value'])}")
 print(f"- **Seed**: {cfg_full['seed']}")
 print("\n### Planning targets (metrics engine)\n")
@@ -135,6 +168,9 @@ if mar is None and stw is None:
 else:
     print(f"- **Sortino MAR (annual)**: {fmt_pct(mar)}")
     print(f"- **Success wealth threshold**: {fmt_money(stw)}")
+    sp = agg_row.get("success_probability")
+    if _valid_prob(sp):
+        print(f"- **Success percentage**: {fmt_pct(sp)}")
 
 print("\n### Strategy definition\n")
 print(f"- **Name**: {strategy}")

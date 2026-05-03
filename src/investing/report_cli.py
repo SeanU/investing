@@ -83,7 +83,12 @@ def main() -> None:
         raise SystemExit(
             f"Simulation output not found: {output_dir}. Run investing-simulate first."
         )
-    for name in ("run_metrics.parquet", "aggregate_metrics.parquet", "config.json"):
+    for name in (
+        "run_metrics.parquet",
+        "aggregate_metrics.parquet",
+        "runs.parquet",
+        "config.json",
+    ):
         if not (output_dir / name).is_file():
             raise SystemExit(
                 f"Missing {name} in {output_dir}. Re-run investing-simulate."
