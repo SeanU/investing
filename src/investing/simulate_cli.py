@@ -1,7 +1,8 @@
 """CLI: run portfolio simulations from a JSON config and save raw results to Parquet.
 
 Reads a JSON config describing market data, run count, time horizon, starting
-value, RNG seed, and a list of strategies (allocation + rebalancing). Runs the
+value, target annual return (Sortino MAR and success wealth), RNG seed, and a
+list of strategies (allocation + rebalancing). Runs the
 existing :func:`investing.simulation.simulate_many` engine and writes the full
 raw output (portfolios, holdings, trades, dividends, metrics) to one Parquet
 file per table under ``output/<config_stem>/``.
@@ -82,6 +83,8 @@ class SimulationConfig:
     num_simulations: int
     years: int
     starting_value: float
+    # Annual decimal (e.g. 0.04); Sortino MAR and basis for success wealth threshold.
+    target_annual_return: float
     seed: int
     strategies: list[StrategyConfig]
 
@@ -187,6 +190,15 @@ def load_simulation_config(path: str | Path) -> SimulationConfig:
     if not _is_number(starting_value) or starting_value <= 0:
         raise ValueError("config.starting_value must be a positive number")
 
+    target_annual_return = raw.get("target_annual_return")
+    if target_annual_return is None:
+        raise ValueError(
+            "config.target_annual_return is required (annual decimal, e.g. 0.04); "
+            "it sets the Sortino MAR and the success wealth threshold"
+        )
+    if not _is_number(target_annual_return):
+        raise ValueError("config.target_annual_return must be a number")
+
     seed = raw.get("seed")
     if not _is_pure_int(seed):
         raise ValueError("config.seed must be an integer")
@@ -204,6 +216,7 @@ def load_simulation_config(path: str | Path) -> SimulationConfig:
         num_simulations=int(num_simulations),
         years=int(years),
         starting_value=float(starting_value),
+        target_annual_return=float(target_annual_return),
         seed=int(seed),
         strategies=strategies,
     )
@@ -537,6 +550,7 @@ def run(cfg: SimulationConfig) -> None:
         years=cfg.years,
         start_funds=cfg.starting_value,
         num_simulations=cfg.num_simulations,
+        plan_target_return=cfg.target_annual_return,
         seed=cfg.seed,
         show_progress=True,
     )

@@ -38,7 +38,7 @@ Run many randomized simulations (shared random start dates across strategies) fr
 uv run investing-simulate simulation.example
 ```
 
-The config names a **market data basename** (for example `market_data.example`). The CLI loads `data/<basename>-prices.xlsx` and `data/<basename>-dividends.xlsx` from the current working directory. It also sets `num_simulations`, `years` (horizon), `starting_value`, a required `seed`, and a `strategies` list. Each strategy has a `name`, an `allocation` of ticker → positive integer weights, and `rebalancing`: either `{ "type": "buy_and_hold" }` or `{ "type": "annual", "max_deviation": <number> }` (threshold only applies to annual rebalancing).
+The config names a **market data basename** (for example `market_data.example`). The CLI loads `data/<basename>-prices.xlsx` and `data/<basename>-dividends.xlsx` from the current working directory. It also sets `num_simulations`, `years` (horizon), `starting_value`, required `target_annual_return` (annual decimal, e.g. `0.04` for Sortino MAR and success wealth), a required `seed`, and a `strategies` list. Each strategy has a `name`, an `allocation` of ticker → positive integer weights, and `rebalancing`: either `{ "type": "buy_and_hold" }` or `{ "type": "annual", "max_deviation": <number> }` (threshold only applies to annual rebalancing).
 
 Results are written under `output/<config_stem>/`: Parquet tables for runs, portfolios, holdings, trades, dividends, per-run and aggregate metrics, plus a copy of the input config as `config.json`. If that output directory already exists, the command exits with an error and does not run or overwrite anything.
 

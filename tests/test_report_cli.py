@@ -40,6 +40,7 @@ def test_report_cli_exits_when_output_dir_missing(tmp_path, monkeypatch):
         "num_simulations": 1,
         "years": 1,
         "starting_value": 1000,
+        "target_annual_return": 0.04,
         "seed": 1,
         "strategies": [
             {
@@ -65,6 +66,7 @@ def test_report_cli_exits_when_quarto_missing(tmp_path, monkeypatch):
         "num_simulations": 1,
         "years": 1,
         "starting_value": 1000,
+        "target_annual_return": 0.04,
         "seed": 1,
         "strategies": [
             {

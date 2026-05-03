@@ -44,6 +44,7 @@ _VALID_RAW: dict[str, Any] = {
     "num_simulations": 1,
     "years": 1,
     "starting_value": 1000.0,
+    "target_annual_return": 0.04,
     "seed": 1,
     "strategies": [
         {
@@ -79,6 +80,7 @@ def test_load_valid_config(tmp_path: Path):
     assert cfg.num_simulations == 1
     assert cfg.years == 1
     assert cfg.starting_value == 1000.0
+    assert cfg.target_annual_return == 0.04
     assert cfg.seed == 1
     assert len(cfg.strategies) == 1
 
@@ -144,6 +146,19 @@ def test_starting_value_must_be_positive_number(tmp_path: Path):
     for bad in (0, -100, "100", True):
         raw = {**_VALID_RAW, "starting_value": bad}
         with pytest.raises(ValueError, match="starting_value"):
+            load_simulation_config(_write_config(tmp_path, raw))
+
+
+def test_target_annual_return_is_required(tmp_path: Path):
+    raw = {k: v for k, v in _VALID_RAW.items() if k != "target_annual_return"}
+    with pytest.raises(ValueError, match="target_annual_return"):
+        load_simulation_config(_write_config(tmp_path, raw))
+
+
+def test_target_annual_return_must_be_number(tmp_path: Path):
+    for bad in ("0.04", None, True):
+        raw = {**_VALID_RAW, "target_annual_return": bad}
+        with pytest.raises(ValueError, match="target_annual_return"):
             load_simulation_config(_write_config(tmp_path, raw))
 
 
@@ -352,6 +367,7 @@ def _smoke_config(tmp_path: Path) -> Path:
             "num_simulations": 2,
             "years": 1,
             "starting_value": 10000.0,
+            "target_annual_return": 0.04,
             "seed": 7,
             "strategies": [
                 {

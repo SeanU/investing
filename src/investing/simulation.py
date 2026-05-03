@@ -482,7 +482,16 @@ def _run_simulations_for_strategy(
             )
         )
 
-    aggregate_metrics = aggregate_simulation_metrics(run_metrics)
+    first_targets = run_metrics[0] if run_metrics else None
+    aggregate_metrics = aggregate_simulation_metrics(
+        run_metrics,
+        sortino_target_return_used=(
+            first_targets.sortino_target_return_used if first_targets else None
+        ),
+        success_target_wealth_used=(
+            first_targets.success_target_wealth_used if first_targets else None
+        ),
+    )
     return MultiSimulationResult(
         simulations=simulations,
         run_metrics=run_metrics,
