@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from shutil import which
+from shutil import move, rmtree, which
 
 from investing.simulate_cli import load_simulation_config, simulation_config_path
 
@@ -87,6 +87,8 @@ def main() -> None:
         "run_metrics.parquet",
         "aggregate_metrics.parquet",
         "runs.parquet",
+        "portfolios.parquet",
+        "holdings.parquet",
         "config.json",
     ):
         if not (output_dir / name).is_file():
@@ -113,14 +115,19 @@ def main() -> None:
 
     template_text = qmd.read_text(encoding="utf-8")
     reports_abs = reports_dir.resolve()
+    quarto_cwd = _quarto_project_dir().resolve()
+    freeze_dir = quarto_cwd / ".quarto" / "_freeze"
+    if freeze_dir.is_dir():
+        rmtree(freeze_dir)
     safe_stem = slug_strategy_filename(stem)
 
     for strat in cfg.strategies:
         slug = slug_strategy_filename(strat.name)
         pdf_name = f"{slug}.pdf"
+        pdf_path = reports_abs / pdf_name
         # Unique .qmd under the Quarto project so _quarto.yml applies and freeze/cache
         # keys differ; literals avoid env vars not reaching the Jupyter kernel on Windows.
-        render_qmd = _quarto_project_dir() / f"_render_{safe_stem}_{slug}.qmd"
+        render_qmd = quarto_cwd / f"_render_{safe_stem}_{slug}.qmd"
         try:
             render_qmd.write_text(
                 _inject_report_parameters(template_text, output_dir, strat.name),
@@ -129,7 +136,7 @@ def main() -> None:
             cmd = [
                 quarto_exe,
                 "render",
-                str(render_qmd.resolve()),
+                str(render_qmd),
                 "-M",
                 f"title:{strat.name}",
                 "-M",
@@ -138,7 +145,10 @@ def main() -> None:
                 pdf_name,
             ]
             print(f"Rendering {pdf_name} ({strat.name!r})...", flush=True)
-            subprocess.run(cmd, check=True, env=env, cwd=str(reports_abs))
+            subprocess.run(cmd, check=True, env=env, cwd=str(quarto_cwd))
+            rendered_pdf = quarto_cwd / pdf_name
+            if rendered_pdf.resolve() != pdf_path.resolve():
+                move(str(rendered_pdf), str(pdf_path))
         finally:
             render_qmd.unlink(missing_ok=True)
 

@@ -2,7 +2,9 @@
 title: "Simulation strategy report"
 subtitle: "Monte Carlo summary"
 jupyter: python3
-format: typst
+format:
+  typst:
+    fig-format: svg
 execute:
   echo: false
   warning: false
@@ -38,6 +40,7 @@ from pathlib import Path
 import polars as pl
 
 from investing.metrics import percentile_linear
+from investing.simulation_output import extreme_cagr_runs, run_total_value_series
 
 
 def _valid_prob(x):
@@ -55,12 +58,13 @@ strat_cfg = next((s for s in cfg_full["strategies"] if s["name"] == strategy), N
 if strat_cfg is None:
     raise SystemExit(f"Strategy {strategy!r} not found in config.json")
 
-runs_tbl = pl.read_parquet(out / "runs.parquet").filter(pl.col("strategy") == strategy)
-if runs_tbl.height == 0:
+runs_tbl = pl.read_parquet(out / "runs.parquet")
+runs_strategy = runs_tbl.filter(pl.col("strategy") == strategy)
+if runs_strategy.height == 0:
     trial_start_earliest = trial_start_latest = None
 else:
-    trial_start_earliest = runs_tbl["start_date"].min()
-    trial_start_latest = runs_tbl["start_date"].max()
+    trial_start_earliest = runs_strategy["start_date"].min()
+    trial_start_latest = runs_strategy["start_date"].max()
 
 run_m = pl.read_parquet(out / "run_metrics.parquet")
 df = run_m.filter(pl.col("strategy") == strategy)
@@ -206,43 +210,36 @@ for key, _col, label in metrics_spec:
     )
 print("\n".join(lines))
 
-print("\n## Distributions\n")
-```
-
-```{python}
-#| fig-cap: "Final portfolio value across runs (vertical lines: P10, P50, P90)"
-#| fig-width: 6
-#| fig-height: 3.2
-
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-sm = summaries["final_value"]
-if sm["n"] == 0:
-    print("*No final portfolio value data.*")
+print("\n## CAGR by trial start date\n")
+cagr_extremes = extreme_cagr_runs(runs_tbl, run_m, strategy)
+if cagr_extremes is None:
+    print("*No valid CAGR data across runs.*\n")
 else:
-    fig, ax = plt.subplots(figsize=(6, 3.2))
-    sns.histplot(sm["vals"], kde=sm["n"] >= 10, ax=ax, stat="density")
-    for v in (sm["p10"], sm["p50"], sm["p90"]):
-        if v is not None:
-            ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
-    ax.set_xlabel("Final value ($)")
-    plt.tight_layout()
-    plt.show()
+    best_run, worst_run = cagr_extremes
+    print(
+        f"- **Best trial**: {best_run['start_date'].isoformat()} → "
+        f"{best_run['end_date'].isoformat()}, CAGR {fmt_pct(best_run['cagr'])}, "
+        f"run index {best_run['run_index']}"
+    )
+    print(
+        f"- **Worst trial**: {worst_run['start_date'].isoformat()} → "
+        f"{worst_run['end_date'].isoformat()}, CAGR {fmt_pct(worst_run['cagr'])}, "
+        f"run index {worst_run['run_index']}"
+    )
+    print()
 ```
 
 ```{python}
 #| fig-cap: "CAGR across runs (vertical lines: P10, P50, P90)"
 #| fig-width: 6
 #| fig-height: 3.2
+#| fig-format: svg
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 sm = summaries["cagr"]
+fig = None
 if sm["n"] == 0:
     print("*No CAGR data.*")
 else:
@@ -252,19 +249,82 @@ else:
         if v is not None:
             ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
     ax.set_xlabel("CAGR (fraction)")
-    plt.tight_layout()
-    plt.show()
+    fig.tight_layout()
+fig
+```
+
+```{python}
+#| fig-cap: "Portfolio value over time for best- and worst-CAGR trials (monthly reporting cadence; same basis as CAGR)"
+#| fig-width: 6.5
+#| fig-height: 3.5
+#| fig-format: svg
+
+import matplotlib.pyplot as plt
+
+fig = None
+if cagr_extremes is None:
+    print("*No portfolio value paths (no valid CAGR runs).*")
+else:
+    best_run, worst_run = cagr_extremes
+    market_data = cfg_full["market_data"]
+    fig, ax = plt.subplots(figsize=(6.5, 3.5))
+    for run_row, label_prefix in ((best_run, "Best"), (worst_run, "Worst")):
+        dates, vals = run_total_value_series(
+            out,
+            strategy,
+            int(run_row["run_index"]),
+            market_data,
+            reporting_frequency="monthly",
+        )
+        if not dates:
+            continue
+        start = run_row["start_date"].isoformat()
+        cagr_pct = fmt_pct(run_row["cagr"])
+        ax.plot(dates, vals, label=f"{label_prefix}: {start} ({cagr_pct})")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Portfolio value ($)")
+    ax.legend(loc="best", fontsize=8)
+    fig.tight_layout()
+fig
+```
+
+## Distributions
+
+```{python}
+#| fig-cap: "Final portfolio value across runs (vertical lines: P10, P50, P90)"
+#| fig-width: 6
+#| fig-height: 3.2
+#| fig-format: svg
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+sm = summaries["final_value"]
+fig = None
+if sm["n"] == 0:
+    print("*No final portfolio value data.*")
+else:
+    fig, ax = plt.subplots(figsize=(6, 3.2))
+    sns.histplot(sm["vals"], kde=sm["n"] >= 10, ax=ax, stat="density")
+    for v in (sm["p10"], sm["p50"], sm["p90"]):
+        if v is not None:
+            ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
+    ax.set_xlabel("Final value ($)")
+    fig.tight_layout()
+fig
 ```
 
 ```{python}
 #| fig-cap: "Sortino ratio across runs (vertical lines: P10, P50, P90)"
 #| fig-width: 6
 #| fig-height: 3.2
+#| fig-format: svg
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 sm = summaries["sortino"]
+fig = None
 if sm["n"] == 0:
     print("*No Sortino ratio data.*")
 else:
@@ -274,19 +334,21 @@ else:
         if v is not None:
             ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
     ax.set_xlabel("Sortino ratio")
-    plt.tight_layout()
-    plt.show()
+    fig.tight_layout()
+fig
 ```
 
 ```{python}
 #| fig-cap: "Maximum drawdown across runs (vertical lines: P10, P50, P90; negative = loss from peak)"
 #| fig-width: 6
 #| fig-height: 3.2
+#| fig-format: svg
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 sm = summaries["mdd"]
+fig = None
 if sm["n"] == 0:
     print("*No maximum drawdown data.*")
 else:
@@ -296,6 +358,6 @@ else:
         if v is not None:
             ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
     ax.set_xlabel("Max drawdown (fraction of peak)")
-    plt.tight_layout()
-    plt.show()
+    fig.tight_layout()
+fig
 ```

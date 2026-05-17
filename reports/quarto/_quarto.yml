@@ -9,4 +9,5 @@ execute:
   warning: false
 
 format:
-  typst: default
+  typst:
+    fig-format: svg

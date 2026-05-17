@@ -83,6 +83,8 @@ def test_report_cli_exits_when_quarto_missing(tmp_path, monkeypatch):
         "run_metrics.parquet",
         "aggregate_metrics.parquet",
         "runs.parquet",
+        "portfolios.parquet",
+        "holdings.parquet",
         "config.json",
     ):
         (out / name).write_bytes(b"")
