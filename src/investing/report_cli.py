@@ -1,4 +1,4 @@
-"""CLI: render per-strategy Quarto PDF reports from simulation Parquet output."""
+"""CLI: render per-strategy and comparison Quarto PDF reports from simulation Parquet output."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from shutil import move, rmtree, which
 
@@ -35,16 +36,24 @@ def _strategy_report_qmd() -> Path:
     return _quarto_project_dir() / "strategy_report.qmd"
 
 
-def _inject_report_parameters(template: str, output_dir: Path, strategy: str) -> str:
+def _comparison_report_qmd() -> Path:
+    return _quarto_project_dir() / "comparison_report.qmd"
+
+
+def _inject_report_parameters(
+    template: str,
+    output_dir: Path,
+    strategy: str | None = None,
+) -> str:
     """Replace the marked parameters block with literals so the Jupyter kernel always sees them."""
     start = template.find(_PARAM_START)
     end = template.find(_PARAM_END)
     if start == -1 or end == -1 or end < start:
-        raise ValueError(
-            f"{_strategy_report_qmd()!s} must contain investing-report parameter markers."
-        )
+        raise ValueError("Template must contain investing-report parameter markers.")
     start += len(_PARAM_START)
-    inner = f"output_dir = {str(output_dir.resolve())!r}\n" f"strategy = {strategy!r}\n"
+    inner = f"output_dir = {str(output_dir.resolve())!r}\n"
+    if strategy is not None:
+        inner += f"strategy = {strategy!r}\n"
     return template[:start] + inner + template[end:]
 
 
@@ -56,11 +65,40 @@ def slug_strategy_filename(name: str) -> str:
     return (s or "strategy")[:180]
 
 
+def _render_pdf(
+    *,
+    quarto_exe: str,
+    env: Mapping[str, str],
+    quarto_cwd: Path,
+    render_qmd: Path,
+    pdf_name: str,
+    pdf_path: Path,
+    title: str,
+    subtitle: str,
+) -> None:
+    cmd = [
+        quarto_exe,
+        "render",
+        str(render_qmd),
+        "-M",
+        f"title:{title}",
+        "-M",
+        f"subtitle:{subtitle}",
+        "-o",
+        pdf_name,
+    ]
+    subprocess.run(cmd, check=True, env=env, cwd=str(quarto_cwd))
+    rendered_pdf = quarto_cwd / pdf_name
+    if rendered_pdf.resolve() != pdf_path.resolve():
+        move(str(rendered_pdf), str(pdf_path))
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
-            "Render Typst PDF reports per strategy from output/<NAME>/ Parquet. "
-            "Requires Quarto on PATH and a prior investing-simulate run."
+            "Render Typst PDF reports per strategy plus a strategy comparison PDF "
+            "from output/<NAME>/ Parquet. Requires Quarto on PATH and a prior "
+            "investing-simulate run."
         )
     )
     p.add_argument(
@@ -96,9 +134,12 @@ def main() -> None:
                 f"Missing {name} in {output_dir}. Re-run investing-simulate."
             )
 
-    qmd = _strategy_report_qmd()
-    if not qmd.is_file():
-        raise SystemExit(f"Quarto template not found: {qmd}")
+    strategy_qmd = _strategy_report_qmd()
+    comparison_qmd = _comparison_report_qmd()
+    if not strategy_qmd.is_file():
+        raise SystemExit(f"Quarto template not found: {strategy_qmd}")
+    if not comparison_qmd.is_file():
+        raise SystemExit(f"Quarto template not found: {comparison_qmd}")
 
     reports_dir = Path("reports") / stem
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -113,43 +154,60 @@ def main() -> None:
     env = os.environ.copy()
     env["QUARTO_PYTHON"] = env.get("QUARTO_PYTHON", sys.executable)
 
-    template_text = qmd.read_text(encoding="utf-8")
+    strategy_template = strategy_qmd.read_text(encoding="utf-8")
+    comparison_template = comparison_qmd.read_text(encoding="utf-8")
     reports_abs = reports_dir.resolve()
     quarto_cwd = _quarto_project_dir().resolve()
     freeze_dir = quarto_cwd / ".quarto" / "_freeze"
     if freeze_dir.is_dir():
         rmtree(freeze_dir)
     safe_stem = slug_strategy_filename(stem)
+    subtitle = "Monte Carlo simulation report"
 
     for strat in cfg.strategies:
         slug = slug_strategy_filename(strat.name)
         pdf_name = f"{slug}.pdf"
         pdf_path = reports_abs / pdf_name
-        # Unique .qmd under the Quarto project so _quarto.yml applies and freeze/cache
-        # keys differ; literals avoid env vars not reaching the Jupyter kernel on Windows.
         render_qmd = quarto_cwd / f"_render_{safe_stem}_{slug}.qmd"
         try:
             render_qmd.write_text(
-                _inject_report_parameters(template_text, output_dir, strat.name),
+                _inject_report_parameters(strategy_template, output_dir, strat.name),
                 encoding="utf-8",
             )
-            cmd = [
-                quarto_exe,
-                "render",
-                str(render_qmd),
-                "-M",
-                f"title:{strat.name}",
-                "-M",
-                "subtitle:Monte Carlo simulation report",
-                "-o",
-                pdf_name,
-            ]
             print(f"Rendering {pdf_name} ({strat.name!r})...", flush=True)
-            subprocess.run(cmd, check=True, env=env, cwd=str(quarto_cwd))
-            rendered_pdf = quarto_cwd / pdf_name
-            if rendered_pdf.resolve() != pdf_path.resolve():
-                move(str(rendered_pdf), str(pdf_path))
+            _render_pdf(
+                quarto_exe=quarto_exe,
+                env=env,
+                quarto_cwd=quarto_cwd,
+                render_qmd=render_qmd,
+                pdf_name=pdf_name,
+                pdf_path=pdf_path,
+                title=strat.name,
+                subtitle=subtitle,
+            )
         finally:
             render_qmd.unlink(missing_ok=True)
+
+    comparison_pdf = "comparison.pdf"
+    comparison_path = reports_abs / comparison_pdf
+    comparison_render_qmd = quarto_cwd / f"_render_{safe_stem}_comparison.qmd"
+    try:
+        comparison_render_qmd.write_text(
+            _inject_report_parameters(comparison_template, output_dir),
+            encoding="utf-8",
+        )
+        print(f"Rendering {comparison_pdf}...", flush=True)
+        _render_pdf(
+            quarto_exe=quarto_exe,
+            env=env,
+            quarto_cwd=quarto_cwd,
+            render_qmd=comparison_render_qmd,
+            pdf_name=comparison_pdf,
+            pdf_path=comparison_path,
+            title="Strategy comparison",
+            subtitle=subtitle,
+        )
+    finally:
+        comparison_render_qmd.unlink(missing_ok=True)
 
     print(f"Wrote reports under {reports_dir.resolve()}", flush=True)

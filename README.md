@@ -44,7 +44,7 @@ Results are written under `output/<config_stem>/`: Parquet tables for runs, port
 
 ### Simulation reports (Quarto + Typst)
 
-After a successful simulate run, generate one **PDF per strategy** (Typst) into `reports/<config_stem>/`:
+After a successful simulate run, generate one **PDF per strategy** plus a **`comparison.pdf`** that compares all strategies (Typst) into `reports/<config_stem>/`:
 
 1. Install [Quarto](https://quarto.org/docs/get-started/) so `quarto` is on your `PATH`.
 2. From the repo root (with `uv sync` already run), point Quarto at this project’s Python so executed chunks resolve the `investing` package and dependencies:
@@ -60,4 +60,4 @@ uv run investing-report simulation.example
 
 Use the same **config stem** as `investing-simulate` (not the path to `output/`). The CLI requires existing `output/<stem>/` Parquet and `config.json`.
 
-Templates live under [`reports/quarto/`](./reports/quarto/) (`strategy_report.qmd`, `_quarto.yml`).
+Templates live under [`reports/quarto/`](./reports/quarto/) (`strategy_report.qmd`, `comparison_report.qmd`, `_quarto.yml`).

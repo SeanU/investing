@@ -238,19 +238,18 @@ else:
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+plt.close("all")
 sm = summaries["cagr"]
-fig = None
 if sm["n"] == 0:
     print("*No CAGR data.*")
 else:
-    fig, ax = plt.subplots(figsize=(6, 3.2))
+    _, ax = plt.subplots(figsize=(6, 3.2))
     sns.histplot(sm["vals"], kde=sm["n"] >= 10, ax=ax, stat="density")
     for v in (sm["p10"], sm["p50"], sm["p90"]):
         if v is not None:
             ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
     ax.set_xlabel("CAGR (fraction)")
-    fig.tight_layout()
-fig
+    plt.tight_layout()
 ```
 
 ```{python}
@@ -261,13 +260,13 @@ fig
 
 import matplotlib.pyplot as plt
 
-fig = None
+plt.close("all")
 if cagr_extremes is None:
     print("*No portfolio value paths (no valid CAGR runs).*")
 else:
     best_run, worst_run = cagr_extremes
     market_data = cfg_full["market_data"]
-    fig, ax = plt.subplots(figsize=(6.5, 3.5))
+    _, ax = plt.subplots(figsize=(6.5, 3.5))
     for run_row, label_prefix in ((best_run, "Best"), (worst_run, "Worst")):
         dates, vals = run_total_value_series(
             out,
@@ -284,8 +283,7 @@ else:
     ax.set_xlabel("Date")
     ax.set_ylabel("Portfolio value ($)")
     ax.legend(loc="best", fontsize=8)
-    fig.tight_layout()
-fig
+    plt.tight_layout()
 ```
 
 ## Distributions
@@ -299,19 +297,18 @@ fig
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+plt.close("all")
 sm = summaries["final_value"]
-fig = None
 if sm["n"] == 0:
     print("*No final portfolio value data.*")
 else:
-    fig, ax = plt.subplots(figsize=(6, 3.2))
+    _, ax = plt.subplots(figsize=(6, 3.2))
     sns.histplot(sm["vals"], kde=sm["n"] >= 10, ax=ax, stat="density")
     for v in (sm["p10"], sm["p50"], sm["p90"]):
         if v is not None:
             ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
     ax.set_xlabel("Final value ($)")
-    fig.tight_layout()
-fig
+    plt.tight_layout()
 ```
 
 ```{python}
@@ -323,23 +320,22 @@ fig
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+plt.close("all")
 sm = summaries["sortino"]
-fig = None
 if sm["n"] == 0:
     print("*No Sortino ratio data.*")
 else:
-    fig, ax = plt.subplots(figsize=(6, 3.2))
+    _, ax = plt.subplots(figsize=(6, 3.2))
     sns.histplot(sm["vals"], kde=sm["n"] >= 10, ax=ax, stat="density")
     for v in (sm["p10"], sm["p50"], sm["p90"]):
         if v is not None:
             ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
     ax.set_xlabel("Sortino ratio")
-    fig.tight_layout()
-fig
+    plt.tight_layout()
 ```
 
 ```{python}
-#| fig-cap: "Maximum drawdown across runs (vertical lines: P10, P50, P90; negative = loss from peak)"
+#| fig-cap: "Maximum drawdown across runs (vertical lines: P10, P50, P90; absolute loss from peak)"
 #| fig-width: 6
 #| fig-height: 3.2
 #| fig-format: svg
@@ -347,17 +343,17 @@ fig
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+plt.close("all")
 sm = summaries["mdd"]
-fig = None
 if sm["n"] == 0:
     print("*No maximum drawdown data.*")
 else:
-    fig, ax = plt.subplots(figsize=(6, 3.2))
-    sns.histplot(sm["vals"], kde=sm["n"] >= 10, ax=ax, stat="density")
+    _, ax = plt.subplots(figsize=(6, 3.2))
+    mdd_vals = [abs(v) for v in sm["vals"]]
+    sns.histplot(mdd_vals, kde=sm["n"] >= 10, ax=ax, stat="density")
     for v in (sm["p10"], sm["p50"], sm["p90"]):
         if v is not None:
-            ax.axvline(v, color="darkred", alpha=0.75, linewidth=1.2)
-    ax.set_xlabel("Max drawdown (fraction of peak)")
-    fig.tight_layout()
-fig
+            ax.axvline(abs(v), color="darkred", alpha=0.75, linewidth=1.2)
+    ax.set_xlabel("Max drawdown (|loss| from peak)")
+    plt.tight_layout()
 ```

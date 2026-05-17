@@ -1,0 +1,303 @@
+---
+title: "Strategy comparison"
+subtitle: "Monte Carlo summary"
+jupyter: python3
+format:
+  typst:
+    fig-format: svg
+execute:
+  echo: false
+  warning: false
+  cache: false
+  freeze: false
+# title/subtitle overridden per render via `quarto render -M title=...` from investing-report
+---
+
+```{python}
+#| tags: [parameters]
+
+# <<investing-report-parameters>>
+# For `uv run investing-report`, the CLI replaces the lines between the markers with
+# literal assignments (Quarto's Jupyter process often does not see subprocess env vars).
+import os
+
+output_dir = os.environ.get("INVESTING_REPORT_OUTPUT_DIR", "")
+# <</investing-report-parameters>>
+```
+
+```{python}
+#| output: asis
+
+import json
+import math
+import statistics
+from pathlib import Path
+
+import polars as pl
+
+from investing.metrics import percentile_linear
+
+
+def _valid_prob(x):
+    return x is not None and not (isinstance(x, float) and math.isnan(x))
+
+
+if not output_dir:
+    raise SystemExit(
+        "Set output_dir (normally via `uv run investing-report <CONFIG_STEM>`)."
+    )
+
+out = Path(output_dir)
+cfg_full = json.loads((out / "config.json").read_text(encoding="utf-8"))
+strategy_names = [s["name"] for s in cfg_full["strategies"]]
+
+run_m = pl.read_parquet(out / "run_metrics.parquet")
+agg = pl.read_parquet(out / "aggregate_metrics.parquet")
+
+runs_tbl = pl.read_parquet(out / "runs.parquet")
+if runs_tbl.height == 0:
+    trial_start_earliest = trial_start_latest = None
+else:
+    trial_start_earliest = runs_tbl["start_date"].min()
+    trial_start_latest = runs_tbl["start_date"].max()
+
+
+def fmt_pct(x):
+    if x is None:
+        return "—"
+    return f"{100 * x:.2f}%"
+
+
+def fmt_money(x):
+    if x is None:
+        return "—"
+    return f"${x:,.2f}"
+
+
+def summarize_col(df, colname):
+    s = df[colname].drop_nulls()
+    vals = [float(v) for v in s.to_list()]
+    n = len(vals)
+    if n == 0:
+        return {
+            "mean": None,
+            "std": None,
+            "p10": None,
+            "p50": None,
+            "p90": None,
+            "n": 0,
+            "vals": [],
+        }
+    mean = statistics.fmean(vals)
+    std = statistics.stdev(vals) if n > 1 else None
+    return {
+        "mean": mean,
+        "std": std,
+        "p10": percentile_linear(vals, 0.10),
+        "p50": percentile_linear(vals, 0.50),
+        "p90": percentile_linear(vals, 0.90),
+        "n": n,
+        "vals": vals,
+    }
+
+
+metrics_spec = [
+    ("final_value", "terminal_wealth_p50", "Final portfolio value"),
+    ("cagr", "cagr", "CAGR (compound annual growth)"),
+    ("sortino", "sortino_ratio", "Sortino ratio"),
+    ("mdd", "max_drawdown", "Maximum drawdown"),
+]
+
+has_success_metric = (
+    agg.filter(pl.col("success_probability").is_finite()).height > 0
+    or run_m.filter(pl.col("success_probability").is_finite()).height > 0
+)
+if has_success_metric:
+    metrics_spec.append(
+        (
+            "success_probability",
+            "success_probability",
+            "Success rate (terminal wealth ≥ threshold)",
+        )
+    )
+
+per_strategy_summaries = {}
+for name in strategy_names:
+    df = run_m.filter(pl.col("strategy") == name)
+    per_strategy_summaries[name] = {
+        key: summarize_col(df, col) for key, col, _ in metrics_spec
+    }
+
+
+def fmt_cell(metric_key, x):
+    if x is None:
+        return "—"
+    if metric_key == "final_value":
+        return fmt_money(x)
+    if metric_key in ("cagr", "mdd"):
+        return fmt_pct(x)
+    if metric_key == "sortino":
+        return f"{x:.4f}".rstrip("0").rstrip(".") or "0"
+    if metric_key == "success_probability":
+        return fmt_pct(x)
+    return str(x)
+
+
+print("## Simulation parameters\n")
+print(f"- **Market data**: `{cfg_full['market_data']}`")
+print(f"- **Horizon (years)**: {cfg_full['years']}")
+print(f"- **Number of simulations**: {cfg_full['num_simulations']}")
+if trial_start_earliest is not None and trial_start_latest is not None:
+    print(
+        "- **Trial start dates (earliest / latest)**: "
+        f"{trial_start_earliest.isoformat()} / {trial_start_latest.isoformat()}"
+    )
+else:
+    print("- **Trial start dates (earliest / latest)**: —")
+print(f"- **Starting value**: {fmt_money(cfg_full['starting_value'])}")
+print(f"- **Seed**: {cfg_full['seed']}")
+
+agg0 = agg.row(0, named=True) if agg.height > 0 else {}
+mar = agg0.get("sortino_target_return_used")
+stw = agg0.get("success_target_wealth_used")
+print("\n### Planning targets (metrics engine)\n")
+if mar is None and stw is None:
+    print("*Planning targets were not used (Sortino MAR / success wealth not set).*")
+else:
+    print(f"- **Sortino MAR (annual)**: {fmt_pct(mar)}")
+    print(f"- **Success wealth threshold**: {fmt_money(stw)}")
+
+print("\n## Strategy overview\n")
+hdr = "| Strategy | Allocation | Rebalancing |"
+sep = "| --- | --- | --- |"
+overview_lines = [hdr, sep]
+for strat_cfg in cfg_full["strategies"]:
+    name = strat_cfg["name"]
+    alloc = ", ".join(f"{t}: {w}" for t, w in sorted(strat_cfg["allocation"].items()))
+    rb = strat_cfg["rebalancing"]
+    if rb["type"] == "buy_and_hold":
+        rb_desc = "buy and hold"
+    else:
+        rb_desc = f"annual, max deviation {rb['max_deviation']}"
+    overview_lines.append(f"| {name} | {alloc} | {rb_desc} |")
+print("\n".join(overview_lines))
+
+print("\n## Cross-strategy summary\n")
+print(
+    "*Percentiles use `investing.metrics.percentile_linear` (same as per-strategy reports).*"
+)
+for stat_name, stat_key in (
+    ("Mean", "mean"),
+    ("P10", "p10"),
+    ("P50", "p50"),
+    ("P90", "p90"),
+):
+    print(f"\n### {stat_name}\n")
+    hdr = "| Metric | " + " | ".join(strategy_names) + " |"
+    sep = "| --- | " + " | ".join(["---"] * len(strategy_names)) + " |"
+    lines = [hdr, sep]
+    for key, _col, label in metrics_spec:
+        cells = [
+            fmt_cell(key, per_strategy_summaries[name][key][stat_key])
+            for name in strategy_names
+        ]
+        lines.append("| {label} | {cells} |".format(label=label, cells=" | ".join(cells)))
+    print("\n".join(lines))
+```
+
+## Distributions by strategy
+
+```{python}
+#| fig-cap: "CAGR across runs by strategy"
+#| fig-width: 7
+#| fig-height: 3.5
+#| fig-format: svg
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+plt.close("all")
+plot_df = run_m.filter(pl.col("cagr").is_finite()).select("strategy", "cagr")
+if plot_df.height == 0:
+    print("*No CAGR data.*")
+else:
+    _, ax = plt.subplots(figsize=(7, 3.5))
+    sns.boxplot(data=plot_df.to_pandas(), x="strategy", y="cagr", ax=ax)
+    ax.set_xlabel("")
+    ax.set_ylabel("CAGR (fraction)")
+    ax.tick_params(axis="x", rotation=25)
+    plt.tight_layout()
+```
+
+```{python}
+#| fig-cap: "Final portfolio value across runs by strategy"
+#| fig-width: 7
+#| fig-height: 3.5
+#| fig-format: svg
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+plt.close("all")
+plot_df = run_m.filter(pl.col("terminal_wealth_p50").is_finite()).select(
+    "strategy", "terminal_wealth_p50"
+)
+if plot_df.height == 0:
+    print("*No final portfolio value data.*")
+else:
+    _, ax = plt.subplots(figsize=(7, 3.5))
+    sns.boxplot(data=plot_df.to_pandas(), x="strategy", y="terminal_wealth_p50", ax=ax)
+    ax.set_xlabel("")
+    ax.set_ylabel("Final value ($)")
+    ax.tick_params(axis="x", rotation=25)
+    plt.tight_layout()
+```
+
+```{python}
+#| fig-cap: "Sortino ratio across runs by strategy"
+#| fig-width: 7
+#| fig-height: 3.5
+#| fig-format: svg
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+plt.close("all")
+plot_df = run_m.filter(pl.col("sortino_ratio").is_finite()).select(
+    "strategy", "sortino_ratio"
+)
+if plot_df.height == 0:
+    print("*No Sortino ratio data.*")
+else:
+    _, ax = plt.subplots(figsize=(7, 3.5))
+    sns.boxplot(data=plot_df.to_pandas(), x="strategy", y="sortino_ratio", ax=ax)
+    ax.set_xlabel("")
+    ax.set_ylabel("Sortino ratio")
+    ax.tick_params(axis="x", rotation=25)
+    plt.tight_layout()
+```
+
+```{python}
+#| fig-cap: "Maximum drawdown across runs by strategy (absolute loss from peak)"
+#| fig-width: 7
+#| fig-height: 3.5
+#| fig-format: svg
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+plt.close("all")
+plot_df = run_m.filter(pl.col("max_drawdown").is_finite()).select(
+    "strategy",
+    pl.col("max_drawdown").abs().alias("max_drawdown"),
+)
+if plot_df.height == 0:
+    print("*No maximum drawdown data.*")
+else:
+    _, ax = plt.subplots(figsize=(7, 3.5))
+    sns.boxplot(data=plot_df.to_pandas(), x="strategy", y="max_drawdown", ax=ax)
+    ax.set_xlabel("")
+    ax.set_ylabel("Max drawdown (|loss| from peak)")
+    ax.tick_params(axis="x", rotation=25)
+    plt.tight_layout()
+```
