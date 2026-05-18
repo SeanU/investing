@@ -129,6 +129,59 @@ def test_sortino_with_explicit_mar():
     assert m.sortino_ratio == pytest.approx(1.25, rel=2e-3)
 
 
+def test_annualized_std_daily_uses_trading_day_count():
+    """Daily reporting samples trading days only, so std annualizes by sqrt(252).
+
+    Prices 100 -> 110 -> 99 produce returns of exactly +10% and -10%, giving
+    population SD of 0.10. With daily cadence and 252 trading-day periods, the
+    annualized std should be 0.10 * sqrt(252).
+    """
+    from math import sqrt
+
+    hist = _mh(
+        "A",
+        [
+            (date(2026, 1, 5), 100.0),
+            (date(2026, 1, 6), 110.0),
+            (date(2026, 1, 7), 99.0),
+        ],
+    )
+    port = _single_holding_portfolio(date(2026, 1, 5), "A", 100.0, 1.0)
+    m = compute_simulation_metrics(
+        [port],
+        hist,
+        plan_target_return=0.0,
+        start_funds=100.0,
+        reporting_frequency="daily",
+    )
+    assert m.std_dev_returns is not None
+    assert m.std_dev_returns == pytest.approx(0.10 * sqrt(252), rel=1e-6)
+
+
+def test_annualized_std_weekly_uses_52_periods():
+    """Same per-period SD as the daily test, weekly cadence: annualize by sqrt(52)."""
+    from math import sqrt
+
+    hist = _mh(
+        "A",
+        [
+            (date(2026, 1, 5), 100.0),
+            (date(2026, 1, 12), 110.0),
+            (date(2026, 1, 19), 99.0),
+        ],
+    )
+    port = _single_holding_portfolio(date(2026, 1, 5), "A", 100.0, 1.0)
+    m = compute_simulation_metrics(
+        [port],
+        hist,
+        plan_target_return=0.0,
+        start_funds=100.0,
+        reporting_frequency="weekly",
+    )
+    assert m.std_dev_returns is not None
+    assert m.std_dev_returns == pytest.approx(0.10 * sqrt(52), rel=1e-6)
+
+
 def test_sortino_undefined_when_no_downside_vs_mar():
     """Constant growth above MAR => downside deviation 0 => Sortino None."""
     hist = _mh(

@@ -6,6 +6,7 @@ Utilities for portfolio data workflows, including Google Sheets export, ticker m
 
 - [`docs/google-sheets-cli.md`](./docs/google-sheets-cli.md): Create and export market-data workbooks with `investing-sheets`.
 - [`docs/instruments-cli.md`](./docs/instruments-cli.md): Fill missing names in `config/all_instruments.csv` with `investing-instruments`.
+- [`docs/simulation-metrics.md`](./docs/simulation-metrics.md): Definitions of the metrics computed by `investing-simulate` (CAGR, max drawdown, Sortino, success probability, terminal-wealth percentiles).
 
 ## Quick start
 

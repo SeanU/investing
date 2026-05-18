@@ -3,6 +3,7 @@
   "num_simulations": 200,
   "years": 30,
   "starting_value": 100000,
+  "target_annual_return": 0.04,
   "seed": 42,
   "strategies": [
     {

@@ -44,21 +44,23 @@ def _reporting_dates(
         return []
 
     start_date = min(portfolio.as_of_date for portfolio in portfolios)
-    steppers = {
-        "daily": lambda d: d + timedelta(days=1),
-        "weekly": lambda d: d + timedelta(days=7),
-        "monthly": _next_month,
-    }
-    if reporting_frequency not in steppers:
-        raise ValueError(REPORTING_FREQUENCY_ERROR)
-    next_date = steppers[reporting_frequency]
 
-    cadence_dates: list[date] = []
+    if reporting_frequency == "daily":
+        cadence_dates: list[date] = history.trading_days(start_date, history.end_date)
+    else:
+        steppers = {
+            "weekly": lambda d: d + timedelta(days=7),
+            "monthly": _next_month,
+        }
+        if reporting_frequency not in steppers:
+            raise ValueError(REPORTING_FREQUENCY_ERROR)
+        next_date = steppers[reporting_frequency]
 
-    current_date = start_date
-    while current_date <= history.end_date:
-        cadence_dates.append(current_date)
-        current_date = next_date(current_date)
+        cadence_dates = []
+        current_date = start_date
+        while current_date <= history.end_date:
+            cadence_dates.append(current_date)
+            current_date = next_date(current_date)
 
     trade_dates = [portfolio.as_of_date for portfolio in portfolios]
     return sorted(set(cadence_dates + trade_dates))

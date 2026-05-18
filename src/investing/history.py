@@ -1,4 +1,4 @@
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -66,10 +66,36 @@ class MarketHistory:
     _dividend_calendar: DividendCalendar | None = field(
         default=None, init=False, repr=False
     )
+    _trading_days: list[date] | None = field(default=None, init=False, repr=False)
 
     @property
     def end_date(self) -> date:
         return max(history.end_date for history in self.securities.values())
+
+    def _all_trading_days(self) -> list[date]:
+        """Sorted union of every security's price dates. Built once, then cached."""
+        if self._trading_days is None:
+            unique_dates: set[date] = set()
+            for security in self.securities.values():
+                for price in security.prices:
+                    unique_dates.add(price.date)
+            self._trading_days = sorted(unique_dates)
+        return self._trading_days
+
+    def trading_days(self, from_date: date, to_date: date) -> list[date]:
+        """Sorted dates in ``[from_date, to_date]`` on which at least one security has a price.
+
+        Acts as the trading-day calendar for the loaded market: the Vanguard
+        price data we use is itself the trading-day calendar (US business days
+        ex-holidays), so the union of all securities' price dates is the right
+        sampling grid for daily-cadence reporting.
+        """
+        all_days = self._all_trading_days()
+        if not all_days:
+            return []
+        lo = bisect_left(all_days, from_date)
+        hi = bisect_right(all_days, to_date)
+        return all_days[lo:hi]
 
     def _price_lookup(self, ticker: data.Ticker) -> tuple[list[date], list[float]]:
         cached = self._price_index.get(ticker)

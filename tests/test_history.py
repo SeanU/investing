@@ -64,6 +64,91 @@ def test_get_price_returns_latest_price_on_or_before_as_of_date():
     assert market_history.get_price("A", date(2026, 1, 2)) == 10.0
 
 
+def test_trading_days_returns_union_of_all_security_price_dates():
+    """trading_days is the calendar of dates where at least one security trades."""
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 2), 10.0),
+                    d.Price(date(2026, 1, 5), 11.0),
+                ],
+                [],
+            ),
+            "B": h.SecurityHistory(
+                "B",
+                [
+                    d.Price(date(2026, 1, 3), 20.0),
+                    d.Price(date(2026, 1, 5), 21.0),
+                ],
+                [],
+            ),
+        }
+    )
+
+    assert market_history.trading_days(date(2026, 1, 1), date(2026, 1, 7)) == [
+        date(2026, 1, 2),
+        date(2026, 1, 3),
+        date(2026, 1, 5),
+    ]
+
+
+def test_trading_days_clips_to_requested_range_inclusive():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2026, 1, 2), 10.0),
+                    d.Price(date(2026, 1, 3), 10.0),
+                    d.Price(date(2026, 1, 4), 10.0),
+                ],
+                [],
+            )
+        }
+    )
+
+    assert market_history.trading_days(date(2026, 1, 2), date(2026, 1, 3)) == [
+        date(2026, 1, 2),
+        date(2026, 1, 3),
+    ]
+
+
+def test_trading_days_returns_empty_when_range_outside_data():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [d.Price(date(2026, 6, 1), 10.0)],
+                [],
+            )
+        }
+    )
+
+    assert market_history.trading_days(date(2026, 1, 1), date(2026, 5, 31)) == []
+
+
+def test_trading_days_is_cached_between_calls():
+    market_history = h.MarketHistory(
+        {
+            "A": h.SecurityHistory(
+                "A",
+                [
+                    d.Price(date(2026, 1, 1), 10.0),
+                    d.Price(date(2026, 1, 2), 11.0),
+                ],
+                [],
+            )
+        }
+    )
+
+    first = market_history._all_trading_days()
+    second = market_history._all_trading_days()
+    assert first is second
+
+
 def test_load_market_history_combines_price_and_dividend_data_by_ticker():
     """Given: matching ticker sets from prices and dividends workbooks.
 
