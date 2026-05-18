@@ -83,6 +83,21 @@ Without cash flows, terminal-wealth metrics and the success-probability threshol
 
 ---
 
+## 5. Batched per-run metrics computation
+
+**Why.** After the per-run `simulate(...)` loop finishes in `_run_simulations_for_strategy` ([`src/investing/simulation.py`](../src/investing/simulation.py)), the function calls `compute_run_metrics(sim.portfolios, history, ...)` once per simulation. Each call goes through `total_value_series → position_history → reporting_portfolios` ([`src/investing/reporting.py`](../src/investing/reporting.py)), which forward-fills snapshots onto the monthly cadence, builds a fresh `pl.DataFrame` from a Python list-of-dicts, and group-by/aggregates it. With `num_simulations × num_strategies` invocations, the Python-overhead per call dominates and this phase can rival or exceed the simulation loop itself. The newly added "Metrics (...)" progress bar surfaces this cost but doesn't reduce it.
+
+**Scope.**
+
+- Refactor `position_history` (or add a sibling) to accept many runs at once: build one tall DataFrame keyed by `(run_index, date, ticker)` instead of one per run, then compute valuations in a single vectorized pass.
+- Add a `compute_run_metrics_batch(runs, history, *, sortino_target_return, reporting_frequency)` that returns `list[RunMetrics]` by doing the monthly-cadence expansion and pricing once, then running per-run reductions (`cagr`, `max_drawdown`, `std_dev_returns`, `sortino_ratio`, `terminal_wealth`) via Polars `group_by("run_index").agg(...)` or `over("run_index")` window expressions.
+- Keep `compute_run_metrics` as a thin wrapper over the batched path for the single-run case so callers and tests in [`tests/test_metrics.py`](../tests/test_metrics.py) don't move.
+- Confirm parity against the existing per-run implementation with a property-style test that compares both paths on a fixture of a few runs.
+
+**Preconditions.** None. Independent of items 1–4, though it'll feel even more worthwhile once cash flows (item 1) or extra samplers (item 2) push `num_simulations` higher.
+
+---
+
 ## Rejected (for the record, do not implement)
 
 These were explicitly rejected during triage and are recorded here so they don't get re-proposed without intent:

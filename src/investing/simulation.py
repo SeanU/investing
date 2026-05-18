@@ -539,13 +539,23 @@ def _run_simulations_for_strategy(
         horizon_years=horizon_years,
     )
 
+    metrics_iter: Iterable[SimulationResult] = simulations
+    if show_progress:
+        from tqdm.auto import tqdm
+
+        metrics_iter = tqdm(
+            simulations,
+            desc=f"Metrics ({strategy.__class__.__name__})",
+            unit="run",
+        )
+
     run_metrics = [
         compute_run_metrics(
             sim.portfolios,
             history,
             sortino_target_return=resolved_targets.sortino_target_return,
         )
-        for sim in simulations
+        for sim in metrics_iter
     ]
 
     aggregate_metrics = aggregate_simulation_metrics(

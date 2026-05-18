@@ -466,48 +466,96 @@ def write_outputs(
     output_dir: Path,
     cfg: SimulationConfig,
     labeled: dict[str, MultiSimulationResult],
+    *,
+    show_progress: bool = False,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=False)
 
-    portfolio_rows, holding_rows = _build_portfolio_rows(labeled)
+    # Each step is (label, action). Actions defer their row-building until the
+    # step runs so progress reporting reflects the actual long pole (the
+    # `_build_*_rows` calls iterate every snapshot/holding/trade in memory).
+    portfolios_holder: dict[str, list[dict[str, Any]]] = {}
 
-    _write(
-        output_dir / "runs.parquet",
-        _build_runs_rows(cfg, labeled),
-        _RUNS_SCHEMA,
-    )
-    _write(
-        output_dir / "portfolios.parquet",
-        portfolio_rows,
-        _PORTFOLIOS_SCHEMA,
-    )
-    _write(
-        output_dir / "holdings.parquet",
-        holding_rows,
-        _HOLDINGS_SCHEMA,
-    )
-    _write(
-        output_dir / "trades.parquet",
-        _build_trade_rows(labeled),
-        _TRADES_SCHEMA,
-    )
-    _write(
-        output_dir / "dividends.parquet",
-        _build_dividend_rows(labeled),
-        _DIVIDENDS_SCHEMA,
-    )
-    _write(
-        output_dir / "run_metrics.parquet",
-        _build_run_metrics_rows(labeled),
-        _RUN_METRICS_SCHEMA,
-    )
-    _write(
-        output_dir / "aggregate_metrics.parquet",
-        _build_aggregate_metrics_rows(labeled),
-        _AGGREGATE_METRICS_SCHEMA,
-    )
+    def _build_and_cache_portfolio_rows() -> None:
+        portfolio_rows, holding_rows = _build_portfolio_rows(labeled)
+        portfolios_holder["portfolios"] = portfolio_rows
+        portfolios_holder["holdings"] = holding_rows
 
-    shutil.copyfile(cfg.path, output_dir / "config.json")
+    steps: list[tuple[str, Any]] = [
+        (
+            "runs",
+            lambda: _write(
+                output_dir / "runs.parquet",
+                _build_runs_rows(cfg, labeled),
+                _RUNS_SCHEMA,
+            ),
+        ),
+        ("portfolios+holdings (build)", _build_and_cache_portfolio_rows),
+        (
+            "portfolios",
+            lambda: _write(
+                output_dir / "portfolios.parquet",
+                portfolios_holder["portfolios"],
+                _PORTFOLIOS_SCHEMA,
+            ),
+        ),
+        (
+            "holdings",
+            lambda: _write(
+                output_dir / "holdings.parquet",
+                portfolios_holder["holdings"],
+                _HOLDINGS_SCHEMA,
+            ),
+        ),
+        (
+            "trades",
+            lambda: _write(
+                output_dir / "trades.parquet",
+                _build_trade_rows(labeled),
+                _TRADES_SCHEMA,
+            ),
+        ),
+        (
+            "dividends",
+            lambda: _write(
+                output_dir / "dividends.parquet",
+                _build_dividend_rows(labeled),
+                _DIVIDENDS_SCHEMA,
+            ),
+        ),
+        (
+            "run_metrics",
+            lambda: _write(
+                output_dir / "run_metrics.parquet",
+                _build_run_metrics_rows(labeled),
+                _RUN_METRICS_SCHEMA,
+            ),
+        ),
+        (
+            "aggregate_metrics",
+            lambda: _write(
+                output_dir / "aggregate_metrics.parquet",
+                _build_aggregate_metrics_rows(labeled),
+                _AGGREGATE_METRICS_SCHEMA,
+            ),
+        ),
+        ("config.json", lambda: shutil.copyfile(cfg.path, output_dir / "config.json")),
+    ]
+
+    if show_progress:
+        from tqdm.auto import tqdm
+
+        bar = tqdm(total=len(steps), desc="Writing outputs", unit="step")
+        try:
+            for label, action in steps:
+                bar.set_postfix_str(label, refresh=False)
+                action()
+                bar.update(1)
+        finally:
+            bar.close()
+    else:
+        for _label, action in steps:
+            action()
 
 
 # ---------- Orchestration ----------
@@ -571,7 +619,7 @@ def run(cfg: SimulationConfig) -> None:
     )
 
     labeled = _label_results(cfg, result)
-    write_outputs(output_dir, cfg, labeled)
+    write_outputs(output_dir, cfg, labeled, show_progress=True)
 
 
 def _parser() -> argparse.ArgumentParser:
