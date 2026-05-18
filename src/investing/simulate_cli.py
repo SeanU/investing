@@ -20,7 +20,7 @@ from typing import Any, Literal
 import polars as pl
 
 from investing.history import load_market_history
-from investing.metrics import SimulationMetrics
+from investing.metrics import RunMetrics, SimulationMetrics
 from investing.portfolio import AssetAllocation, HoldingTarget
 from investing.simulation import (
     AnnualRebalance,
@@ -291,7 +291,15 @@ _DIVIDENDS_SCHEMA: dict[str, Any] = {
     "total_payment": pl.Float64,
 }
 
-_METRIC_VALUE_FIELDS = (
+_RUN_METRIC_FIELDS = (
+    "cagr",
+    "max_drawdown",
+    "std_dev_returns",
+    "sortino_ratio",
+    "terminal_wealth",
+)
+
+_AGGREGATE_METRIC_FIELDS = (
     "cagr",
     "max_drawdown",
     "std_dev_returns",
@@ -307,20 +315,24 @@ _METRIC_VALUE_FIELDS = (
 _RUN_METRICS_SCHEMA: dict[str, Any] = {
     "strategy": pl.Utf8,
     "run_index": pl.Int64,
-    **{field: pl.Float64 for field in _METRIC_VALUE_FIELDS},
+    **{field: pl.Float64 for field in _RUN_METRIC_FIELDS},
 }
 
 _AGGREGATE_METRICS_SCHEMA: dict[str, Any] = {
     "strategy": pl.Utf8,
-    **{field: pl.Float64 for field in _METRIC_VALUE_FIELDS},
+    **{field: pl.Float64 for field in _AGGREGATE_METRIC_FIELDS},
 }
 
 
 # ---------- Row builders ----------
 
 
-def _metrics_to_row(metrics: SimulationMetrics) -> dict[str, float | None]:
-    return {field: getattr(metrics, field) for field in _METRIC_VALUE_FIELDS}
+def _run_metrics_to_row(metrics: RunMetrics) -> dict[str, float | None]:
+    return {field: getattr(metrics, field) for field in _RUN_METRIC_FIELDS}
+
+
+def _aggregate_metrics_to_row(metrics: SimulationMetrics) -> dict[str, float | None]:
+    return {field: getattr(metrics, field) for field in _AGGREGATE_METRIC_FIELDS}
 
 
 def _build_runs_rows(
@@ -427,7 +439,7 @@ def _build_run_metrics_rows(
                 "strategy": strategy_name,
                 "run_index": run_index,
             }
-            row.update(_metrics_to_row(metrics))
+            row.update(_run_metrics_to_row(metrics))
             rows.append(row)
     return rows
 
@@ -438,7 +450,7 @@ def _build_aggregate_metrics_rows(
     rows: list[dict[str, Any]] = []
     for strategy_name, result in labeled.items():
         row: dict[str, Any] = {"strategy": strategy_name}
-        row.update(_metrics_to_row(result.metrics))
+        row.update(_aggregate_metrics_to_row(result.metrics))
         rows.append(row)
     return rows
 

@@ -126,8 +126,29 @@ def _sortino_ratio(
 
 
 @dataclass(frozen=True)
+class RunMetrics:
+    """Path metrics for a single simulation run.
+
+    Distinct from :class:`SimulationMetrics`, which aggregates across runs.
+    Each field summarizes one portfolio path; ``terminal_wealth`` is the
+    portfolio's resampled value on its last reporting date.
+    """
+
+    cagr: float | None
+    max_drawdown: float | None
+    std_dev_returns: float | None
+    sortino_ratio: float | None
+    terminal_wealth: float | None
+
+
+@dataclass(frozen=True)
 class SimulationMetrics:
-    """Aggregated metrics for one or many simulation runs."""
+    """Aggregated metrics across one or many simulation runs.
+
+    Path metrics (``cagr``, ``max_drawdown``, ``std_dev_returns``,
+    ``sortino_ratio``) are mean-averaged across runs. Terminal wealth is
+    summarized by percentiles using :func:`percentile_linear`.
+    """
 
     cagr: float | None
     max_drawdown: float | None
@@ -142,66 +163,27 @@ class SimulationMetrics:
 
 
 @dataclass(frozen=True)
-class _SingleRunMetrics:
-    cagr: float | None
-    max_drawdown: float | None
-    std_dev_returns: float | None
-    sortino_ratio: float | None
-    terminal_wealth: float | None
+class ResolvedTargets:
+    """Sortino MAR and success-wealth threshold derived from planning inputs."""
 
-
-@dataclass(frozen=True)
-class _ResolvedTargets:
     sortino_target_return: float | None
     success_target_wealth: float | None
 
 
-def _path_metrics_single_run(
-    portfolios: Sequence[Portfolio],
-    history: MarketHistory,
-    reporting_frequency: ReportingFrequency,
-    mar_annual: float | None,
-) -> _SingleRunMetrics:
-    """Returns cagr, max_dd, std_ann, sortino, terminal_wealth."""
-    dates, vals = total_value_series(list(portfolios), history, reporting_frequency)
-    if len(vals) < 2 or len(dates) < 2:
-        terminal = vals[-1] if vals else None
-        return _SingleRunMetrics(
-            cagr=None,
-            max_drawdown=None,
-            std_dev_returns=None,
-            sortino_ratio=None,
-            terminal_wealth=float(terminal) if terminal is not None else None,
-        )
-
-    years = _horizon_years(dates)
-    start_v, end_v = vals[0], vals[-1]
-    cagr = _cagr(start_v, end_v, years)
-    mdd = _max_drawdown(vals)
-    rets = _simple_returns(vals)
-    std_ann = _annualized_std(rets, reporting_frequency) if rets else None
-    sortino = (
-        _sortino_ratio(rets, reporting_frequency, mar_annual)
-        if mar_annual is not None and rets
-        else None
-    )
-    return _SingleRunMetrics(
-        cagr=cagr,
-        max_drawdown=mdd,
-        std_dev_returns=std_ann,
-        sortino_ratio=sortino,
-        terminal_wealth=end_v,
-    )
-
-
-def _resolve_mar_and_success_wealth(
+def resolve_planning_targets(
     *,
     plan_target_return: float | None,
-    sortino_target_return: float | None,
-    success_target_wealth: float | None,
+    sortino_target_return: float | None = None,
+    success_target_wealth: float | None = None,
     initial_wealth: float,
     horizon_years: float,
-) -> _ResolvedTargets:
+) -> ResolvedTargets:
+    """Resolve the Sortino MAR and success-wealth threshold for one set of runs.
+
+    Falls back to ``plan_target_return`` for both targets unless explicitly
+    overridden. Success wealth, when derived, is
+    ``initial_wealth * (1 + plan_target_return) ** horizon_years``.
+    """
     mar = (
         sortino_target_return
         if sortino_target_return is not None
@@ -216,7 +198,50 @@ def _resolve_mar_and_success_wealth(
             stw = initial_wealth
     else:
         stw = None
-    return _ResolvedTargets(sortino_target_return=mar, success_target_wealth=stw)
+    return ResolvedTargets(sortino_target_return=mar, success_target_wealth=stw)
+
+
+def compute_run_metrics(
+    portfolios: Sequence[Portfolio],
+    history: MarketHistory,
+    *,
+    sortino_target_return: float | None = None,
+    reporting_frequency: ReportingFrequency = "monthly",
+) -> RunMetrics:
+    """Path metrics for a single simulation run.
+
+    ``sortino_target_return`` is the annual MAR for the Sortino downside
+    deviation. When ``None`` or when the run has no return observations,
+    ``sortino_ratio`` is reported as ``None``.
+    """
+    dates, vals = total_value_series(list(portfolios), history, reporting_frequency)
+    if len(vals) < 2 or len(dates) < 2:
+        terminal = vals[-1] if vals else None
+        return RunMetrics(
+            cagr=None,
+            max_drawdown=None,
+            std_dev_returns=None,
+            sortino_ratio=None,
+            terminal_wealth=float(terminal) if terminal is not None else None,
+        )
+
+    start_v, end_v = vals[0], vals[-1]
+    cagr = _cagr(start_v, end_v, _horizon_years(dates))
+    mdd = _max_drawdown(vals)
+    rets = _simple_returns(vals)
+    std_ann = _annualized_std(rets, reporting_frequency) if rets else None
+    sortino = (
+        _sortino_ratio(rets, reporting_frequency, sortino_target_return)
+        if sortino_target_return is not None and rets
+        else None
+    )
+    return RunMetrics(
+        cagr=cagr,
+        max_drawdown=mdd,
+        std_dev_returns=std_ann,
+        sortino_ratio=sortino,
+        terminal_wealth=end_v,
+    )
 
 
 def _normalize_runs(
@@ -231,30 +256,60 @@ def _normalize_runs(
     return [list(r) for r in runs]  # type: ignore[union-attr]
 
 
+def _empty_simulation_metrics() -> SimulationMetrics:
+    return SimulationMetrics(
+        cagr=None,
+        max_drawdown=None,
+        std_dev_returns=None,
+        sortino_ratio=None,
+        success_probability=None,
+        terminal_wealth_p10=None,
+        terminal_wealth_p50=None,
+        terminal_wealth_p90=None,
+        sortino_target_return_used=None,
+        success_target_wealth_used=None,
+    )
+
+
 def aggregate_simulation_metrics(
-    run_metrics: Sequence[SimulationMetrics],
+    run_metrics: Sequence[RunMetrics],
     *,
+    success_target_wealth: float | None = None,
     sortino_target_return_used: float | None = None,
     success_target_wealth_used: float | None = None,
 ) -> SimulationMetrics:
-    """Aggregate precomputed per-run metrics into one combined metric set."""
+    """Aggregate per-run :class:`RunMetrics` into combined :class:`SimulationMetrics`.
+
+    Path metrics are mean-averaged across runs (``None`` values are dropped).
+    Terminal wealth is summarized by P10/P50/P90 percentiles across runs.
+    Success probability, when ``success_target_wealth`` is supplied, is the
+    fraction of runs whose ``terminal_wealth`` is at or above the threshold.
+
+    The ``*_used`` parameters are recorded on the returned aggregate so the
+    threshold/MAR actually applied can be displayed in reports.
+    """
     cagrs = [m.cagr for m in run_metrics if m.cagr is not None]
     mdds = [m.max_drawdown for m in run_metrics if m.max_drawdown is not None]
     stds = [m.std_dev_returns for m in run_metrics if m.std_dev_returns is not None]
     sortinos = [m.sortino_ratio for m in run_metrics if m.sortino_ratio is not None]
     terminals = [
-        m.terminal_wealth_p50 for m in run_metrics if m.terminal_wealth_p50 is not None
+        m.terminal_wealth for m in run_metrics if m.terminal_wealth is not None
     ]
-    successes = [
-        m.success_probability for m in run_metrics if m.success_probability is not None
-    ]
+
+    success_prob: float | None
+    if success_target_wealth is None or not terminals:
+        success_prob = None
+    else:
+        success_prob = sum(1 for t in terminals if t >= success_target_wealth) / len(
+            terminals
+        )
 
     return SimulationMetrics(
         cagr=_fmean_or_none(cagrs),
         max_drawdown=_fmean_or_none(mdds),
         std_dev_returns=_fmean_or_none(stds),
         sortino_ratio=_fmean_or_none(sortinos),
-        success_probability=_fmean_or_none(successes),
+        success_probability=success_prob,
         terminal_wealth_p10=percentile_linear(terminals, 0.10) if terminals else None,
         terminal_wealth_p50=percentile_linear(terminals, 0.50) if terminals else None,
         terminal_wealth_p90=percentile_linear(terminals, 0.90) if terminals else None,
@@ -292,18 +347,7 @@ def compute_simulation_metrics(
     """
     run_list = _normalize_runs(runs)
     if not run_list:
-        return SimulationMetrics(
-            cagr=None,
-            max_drawdown=None,
-            std_dev_returns=None,
-            sortino_ratio=None,
-            success_probability=None,
-            terminal_wealth_p10=None,
-            terminal_wealth_p50=None,
-            terminal_wealth_p90=None,
-            sortino_target_return_used=None,
-            success_target_wealth_used=None,
-        )
+        return _empty_simulation_metrics()
 
     first = run_list[0]
     dates0, vals0 = total_value_series(first, history, reporting_frequency)
@@ -315,7 +359,7 @@ def compute_simulation_metrics(
     else:
         initial_wealth = 0.0
 
-    resolved_targets = _resolve_mar_and_success_wealth(
+    resolved_targets = resolve_planning_targets(
         plan_target_return=plan_target_return,
         sortino_target_return=sortino_target_return,
         success_target_wealth=success_target_wealth,
@@ -323,57 +367,19 @@ def compute_simulation_metrics(
         horizon_years=horizon_years,
     )
 
-    cagrs: list[float] = []
-    mdds: list[float] = []
-    stds: list[float] = []
-    sortinos: list[float] = []
-    terminals: list[float] = []
-
-    for run in run_list:
-        run_metrics = _path_metrics_single_run(
+    run_metrics = [
+        compute_run_metrics(
             run,
             history,
-            reporting_frequency,
-            resolved_targets.sortino_target_return,
+            sortino_target_return=resolved_targets.sortino_target_return,
+            reporting_frequency=reporting_frequency,
         )
-        if run_metrics.cagr is not None:
-            cagrs.append(run_metrics.cagr)
-        if run_metrics.max_drawdown is not None:
-            mdds.append(run_metrics.max_drawdown)
-        if run_metrics.std_dev_returns is not None:
-            stds.append(run_metrics.std_dev_returns)
-        if run_metrics.sortino_ratio is not None:
-            sortinos.append(run_metrics.sortino_ratio)
-        if run_metrics.terminal_wealth is not None:
-            terminals.append(run_metrics.terminal_wealth)
+        for run in run_list
+    ]
 
-    cagr_mean = _fmean_or_none(cagrs)
-    mdd_mean = _fmean_or_none(mdds)
-    std_mean = _fmean_or_none(stds)
-
-    sortino_mean = _fmean_or_none(sortinos)
-
-    success_prob: float | None
-    if resolved_targets.success_target_wealth is None or not terminals:
-        success_prob = None
-    else:
-        success_prob = sum(
-            1 for t in terminals if t >= resolved_targets.success_target_wealth
-        ) / len(terminals)
-
-    p10 = percentile_linear(terminals, 0.10) if terminals else None
-    p50 = percentile_linear(terminals, 0.50) if terminals else None
-    p90 = percentile_linear(terminals, 0.90) if terminals else None
-
-    return SimulationMetrics(
-        cagr=cagr_mean,
-        max_drawdown=mdd_mean,
-        std_dev_returns=std_mean,
-        sortino_ratio=sortino_mean,
-        success_probability=success_prob,
-        terminal_wealth_p10=p10,
-        terminal_wealth_p50=p50,
-        terminal_wealth_p90=p90,
+    return aggregate_simulation_metrics(
+        run_metrics,
+        success_target_wealth=resolved_targets.success_target_wealth,
         sortino_target_return_used=resolved_targets.sortino_target_return,
         success_target_wealth_used=resolved_targets.success_target_wealth,
     )

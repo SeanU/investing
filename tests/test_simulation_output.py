@@ -96,4 +96,4 @@ def test_run_total_value_series_matches_terminal_wealth(smoke_output: Path):
     )
     assert len(dates) >= 2
     assert len(vals) == len(dates)
-    assert vals[-1] == pytest.approx(row["terminal_wealth_p50"], rel=1e-6)
+    assert vals[-1] == pytest.approx(row["terminal_wealth"], rel=1e-6)

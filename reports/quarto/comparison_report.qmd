@@ -102,7 +102,7 @@ def summarize_col(df, colname):
 
 
 metrics_spec = [
-    ("final_value", "terminal_wealth_p50", "Final portfolio value"),
+    ("final_value", "terminal_wealth", "Final portfolio value"),
     ("cagr", "cagr", "CAGR (compound annual growth)"),
     ("sortino", "sortino_ratio", "Sortino ratio"),
     ("mdd", "max_drawdown", "Maximum drawdown"),
@@ -239,14 +239,14 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 plt.close("all")
-plot_df = run_m.filter(pl.col("terminal_wealth_p50").is_finite()).select(
-    "strategy", "terminal_wealth_p50"
+plot_df = run_m.filter(pl.col("terminal_wealth").is_finite()).select(
+    "strategy", "terminal_wealth"
 )
 if plot_df.height == 0:
     print("*No final portfolio value data.*")
 else:
     _, ax = plt.subplots(figsize=(7, 3.5))
-    sns.boxplot(data=plot_df.to_pandas(), x="strategy", y="terminal_wealth_p50", ax=ax)
+    sns.boxplot(data=plot_df.to_pandas(), x="strategy", y="terminal_wealth", ax=ax)
     ax.set_xlabel("")
     ax.set_ylabel("Final value ($)")
     ax.tick_params(axis="x", rotation=25)

@@ -11,10 +11,14 @@ from typing import TextIO
 from investing.data import Ticker
 from investing.history import MarketHistory
 from investing.metrics import (
+    RunMetrics,
     SimulationMetrics,
+    _horizon_years,
     aggregate_simulation_metrics,
-    compute_simulation_metrics,
+    compute_run_metrics,
+    resolve_planning_targets,
 )
+from investing.reporting import total_value_series
 from investing.portfolio import (
     AssetAllocation,
     Holding,
@@ -43,7 +47,7 @@ class SimulationResult:
 @dataclass
 class MultiSimulationResult:
     simulations: list[SimulationResult]
-    run_metrics: list[SimulationMetrics]
+    run_metrics: list[RunMetrics]
     metrics: SimulationMetrics
 
 
@@ -495,7 +499,6 @@ def _run_simulations_for_strategy(
     show_progress: bool,
 ) -> MultiSimulationResult:
     simulations: list[SimulationResult] = []
-    run_metrics: list[SimulationMetrics] = []
 
     progress_iter: Iterable[date] = start_dates
     if show_progress:
@@ -517,24 +520,39 @@ def _run_simulations_for_strategy(
             end_date=end_date,
         )
         simulations.append(result)
-        run_metrics.append(
-            compute_simulation_metrics(
-                result.portfolios,
-                history,
-                plan_target_return=plan_target_return,
-                start_funds=start_funds,
-            )
+
+    if not simulations:
+        empty_metrics = aggregate_simulation_metrics([])
+        return MultiSimulationResult(
+            simulations=simulations,
+            run_metrics=[],
+            metrics=empty_metrics,
         )
 
-    first_targets = run_metrics[0] if run_metrics else None
+    first_dates, _first_vals = total_value_series(
+        simulations[0].portfolios, history, "monthly"
+    )
+    horizon_years = _horizon_years(first_dates)
+    resolved_targets = resolve_planning_targets(
+        plan_target_return=plan_target_return,
+        initial_wealth=float(start_funds),
+        horizon_years=horizon_years,
+    )
+
+    run_metrics = [
+        compute_run_metrics(
+            sim.portfolios,
+            history,
+            sortino_target_return=resolved_targets.sortino_target_return,
+        )
+        for sim in simulations
+    ]
+
     aggregate_metrics = aggregate_simulation_metrics(
         run_metrics,
-        sortino_target_return_used=(
-            first_targets.sortino_target_return_used if first_targets else None
-        ),
-        success_target_wealth_used=(
-            first_targets.success_target_wealth_used if first_targets else None
-        ),
+        success_target_wealth=resolved_targets.success_target_wealth,
+        sortino_target_return_used=resolved_targets.sortino_target_return,
+        success_target_wealth_used=resolved_targets.success_target_wealth,
     )
     return MultiSimulationResult(
         simulations=simulations,

@@ -114,7 +114,7 @@ def summarize_col(colname):
 
 
 metrics_spec = [
-    ("final_value", "terminal_wealth_p50", "Final portfolio value"),
+    ("final_value", "terminal_wealth", "Final portfolio value"),
     ("cagr", "cagr", "CAGR (compound annual growth)"),
     ("sortino", "sortino_ratio", "Sortino ratio"),
     ("mdd", "max_drawdown", "Maximum drawdown"),

@@ -508,7 +508,7 @@ def test_simulate_many_returns_results_per_run_and_aggregate_metrics():
             strategy=strategy,
             end_date=simulation.portfolios[-1].as_of_date,
         )
-        assert run_metric.terminal_wealth_p50 == pytest.approx(
+        assert run_metric.terminal_wealth == pytest.approx(
             expected.portfolios[-1].total_value(
                 expected.portfolios[-1].as_of_date, market_history
             )
@@ -546,7 +546,6 @@ def test_simulate_many_applies_plan_target_return_to_metrics():
     assert result.metrics.success_probability is not None
     for run_metric in result.run_metrics:
         assert run_metric.sortino_ratio is not None
-        assert run_metric.success_probability is not None
 
 
 def test_first_available_price_returns_earliest_quote_even_when_unsorted():

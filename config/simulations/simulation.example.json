@@ -1,7 +1,7 @@
 {
   "market_data": "market_data.example",
   "num_simulations": 200,
-  "years": 30,
+  "years": 3,
   "starting_value": 100000,
   "target_annual_return": 0.04,
   "seed": 42,

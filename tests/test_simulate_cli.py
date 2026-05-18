@@ -442,6 +442,15 @@ def test_run_outputs_have_expected_shape(
 
     run_metrics = pl.read_parquet(output_dir / "run_metrics.parquet")
     assert run_metrics.height == 4
+    assert run_metrics.columns == [
+        "strategy",
+        "run_index",
+        "cagr",
+        "max_drawdown",
+        "std_dev_returns",
+        "sortino_ratio",
+        "terminal_wealth",
+    ]
 
     portfolios = pl.read_parquet(output_dir / "portfolios.parquet")
     holdings = pl.read_parquet(output_dir / "holdings.parquet")
