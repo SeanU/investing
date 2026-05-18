@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -12,6 +11,7 @@ from pathlib import Path
 from shutil import move, rmtree, which
 
 from investing.simulate_cli import load_simulation_config, simulation_config_path
+from investing.simulation_output import slug_strategy_filename
 
 _PARAM_START = "# <<investing-report-parameters>>\n"
 _PARAM_END = "# <</investing-report-parameters>>\n"
@@ -55,14 +55,6 @@ def _inject_report_parameters(
     if strategy is not None:
         inner += f"strategy = {strategy!r}\n"
     return template[:start] + inner + template[end:]
-
-
-def slug_strategy_filename(name: str) -> str:
-    """Filesystem-safe stem for report filenames (Windows-safe)."""
-    s = re.sub(r'[<>:"/\\|?*"\u0000-\u001f]', "_", name.strip())
-    s = re.sub(r"\s+", "_", s)
-    s = re.sub(r"_+", "_", s).strip("._")
-    return (s or "strategy")[:180]
 
 
 def _render_pdf(

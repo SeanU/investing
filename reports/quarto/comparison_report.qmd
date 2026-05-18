@@ -108,19 +108,6 @@ metrics_spec = [
     ("mdd", "max_drawdown", "Maximum drawdown"),
 ]
 
-has_success_metric = (
-    agg.filter(pl.col("success_probability").is_finite()).height > 0
-    or run_m.filter(pl.col("success_probability").is_finite()).height > 0
-)
-if has_success_metric:
-    metrics_spec.append(
-        (
-            "success_probability",
-            "success_probability",
-            "Success rate (terminal wealth ≥ threshold)",
-        )
-    )
-
 per_strategy_summaries = {}
 for name in strategy_names:
     df = run_m.filter(pl.col("strategy") == name)
@@ -138,8 +125,6 @@ def fmt_cell(metric_key, x):
         return fmt_pct(x)
     if metric_key == "sortino":
         return f"{x:.4f}".rstrip("0").rstrip(".") or "0"
-    if metric_key == "success_probability":
-        return fmt_pct(x)
     return str(x)
 
 

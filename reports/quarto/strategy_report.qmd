@@ -40,7 +40,12 @@ from pathlib import Path
 import polars as pl
 
 from investing.metrics import percentile_linear
-from investing.simulation_output import extreme_cagr_runs, run_total_value_series
+from investing.simulation_output import (
+    extreme_cagr_runs,
+    load_run_portfolios,
+    run_total_value_series,
+    wealth_paths,
+)
 
 
 def _valid_prob(x):
@@ -120,18 +125,6 @@ metrics_spec = [
     ("mdd", "max_drawdown", "Maximum drawdown"),
 ]
 
-has_success_metric = _valid_prob(agg_row.get("success_probability")) or (
-    df.filter(pl.col("success_probability").is_finite()).height > 0
-)
-if has_success_metric:
-    metrics_spec.append(
-        (
-            "success_probability",
-            "success_probability",
-            "Success rate (terminal wealth ≥ threshold)",
-        )
-    )
-
 summaries = {key: summarize_col(col) for key, col, _ in metrics_spec}
 
 
@@ -144,8 +137,6 @@ def fmt_cell(metric_key, x):
         return fmt_pct(x)
     if metric_key == "sortino":
         return f"{x:.4f}".rstrip("0").rstrip(".") or "0"
-    if metric_key == "success_probability":
-        return fmt_pct(x)
     return str(x)
 
 
@@ -283,6 +274,212 @@ else:
     ax.set_xlabel("Date")
     ax.set_ylabel("Portfolio value ($)")
     ax.legend(loc="best", fontsize=8)
+    plt.tight_layout()
+```
+
+## Wealth across runs
+
+```{python}
+#| output: asis
+
+market_data = cfg_full["market_data"]
+paths = wealth_paths(out, strategy, market_data, reporting_frequency="monthly")
+if paths.height == 0:
+    print("*No portfolio value paths to render.*")
+
+# Per (run, month_offset), take the latest within-month observation so trade-date
+# insertions don't double-count. Then aggregate percentiles across runs by month.
+end_of_month = (
+    paths.sort(["run_index", "month_offset", "date"])
+    .group_by(["run_index", "month_offset"], maintain_order=True)
+    .agg(pl.col("value").last().alias("value"))
+)
+bands = (
+    end_of_month.group_by("month_offset")
+    .agg([
+        pl.col("value").alias("vals"),
+        pl.len().alias("n"),
+    ])
+    .sort("month_offset")
+)
+# Keep only month offsets where every run contributed (drops the ragged tail).
+if bands.height > 0:
+    full_n = bands["n"].max()
+    bands = bands.filter(pl.col("n") == full_n)
+fan_data = []
+for row in bands.iter_rows(named=True):
+    vals = [float(v) for v in row["vals"]]
+    fan_data.append(
+        (
+            row["month_offset"],
+            percentile_linear(vals, 0.10),
+            percentile_linear(vals, 0.50),
+            percentile_linear(vals, 0.90),
+        )
+    )
+```
+
+```{python}
+#| fig-cap: "Portfolio value across simulation runs by months from start (shaded band: P10–P90, line: P50; matches percentile_linear)"
+#| fig-width: 6.5
+#| fig-height: 3.5
+#| fig-format: svg
+
+import matplotlib.pyplot as plt
+
+plt.close("all")
+if not fan_data:
+    print("*No portfolio value paths to render.*")
+else:
+    months = [row[0] for row in fan_data]
+    years_from_start = [m / 12.0 for m in months]
+    p10 = [row[1] for row in fan_data]
+    p50 = [row[2] for row in fan_data]
+    p90 = [row[3] for row in fan_data]
+    _, ax = plt.subplots(figsize=(6.5, 3.5))
+    ax.fill_between(years_from_start, p10, p90, alpha=0.25, label="P10\u2013P90")
+    ax.plot(years_from_start, p50, linewidth=1.6, label="P50")
+    ax.set_xlabel("Years from start")
+    ax.set_ylabel("Portfolio value ($)")
+    ax.legend(loc="best", fontsize=8)
+    plt.tight_layout()
+```
+
+```{python}
+#| output: asis
+
+# Convert each run's wealth path into a drawdown path (value / running peak - 1).
+dd_paths = (
+    paths.sort(["run_index", "date"])
+    .with_columns(pl.col("value").cum_max().over("run_index").alias("peak"))
+    .with_columns((pl.col("value") / pl.col("peak") - 1.0).alias("drawdown"))
+)
+dd_end_of_month = (
+    dd_paths.sort(["run_index", "month_offset", "date"])
+    .group_by(["run_index", "month_offset"], maintain_order=True)
+    .agg(pl.col("drawdown").last().alias("drawdown"))
+)
+dd_bands = (
+    dd_end_of_month.group_by("month_offset")
+    .agg([
+        pl.col("drawdown").alias("vals"),
+        pl.len().alias("n"),
+    ])
+    .sort("month_offset")
+)
+if dd_bands.height > 0:
+    full_n_dd = dd_bands["n"].max()
+    dd_bands = dd_bands.filter(pl.col("n") == full_n_dd)
+dd_fan = []
+for row in dd_bands.iter_rows(named=True):
+    vals = [float(v) for v in row["vals"]]
+    dd_fan.append(
+        (
+            row["month_offset"],
+            percentile_linear(vals, 0.10),
+            percentile_linear(vals, 0.50),
+            percentile_linear(vals, 0.90),
+        )
+    )
+```
+
+```{python}
+#| fig-cap: "Drawdown across runs (loss from running peak; bands: P10\u2013P90, line: P50; lower is worse)"
+#| fig-width: 6.5
+#| fig-height: 3.5
+#| fig-format: svg
+
+import matplotlib.pyplot as plt
+
+plt.close("all")
+if not dd_fan:
+    print("*No drawdown paths to render.*")
+else:
+    months = [row[0] for row in dd_fan]
+    years_from_start = [m / 12.0 for m in months]
+    p10 = [row[1] for row in dd_fan]
+    p50 = [row[2] for row in dd_fan]
+    p90 = [row[3] for row in dd_fan]
+    _, ax = plt.subplots(figsize=(6.5, 3.5))
+    ax.fill_between(years_from_start, p10, p90, alpha=0.25, color="firebrick", label="P10\u2013P90")
+    ax.plot(years_from_start, p50, color="firebrick", linewidth=1.6, label="P50")
+    ax.axhline(0.0, color="black", linewidth=0.7, alpha=0.5)
+    ax.set_xlabel("Years from start")
+    ax.set_ylabel("Drawdown (fraction from running peak)")
+    ax.set_ylim(top=0.02)
+    ax.legend(loc="best", fontsize=8)
+    plt.tight_layout()
+```
+
+## Allocation over time
+
+```{python}
+#| output: asis
+
+from investing.history import load_market_history
+from investing.reporting import reporting_portfolios
+from investing.simulation_output import repo_data_paths
+
+# Pick the median-terminal-wealth run (ties broken by smallest run_index).
+representative_run_index = None
+if run_m.filter(pl.col("terminal_wealth").is_finite()).height > 0:
+    candidates = run_m.filter(
+        (pl.col("strategy") == strategy) & pl.col("terminal_wealth").is_finite()
+    ).sort(["terminal_wealth", "run_index"])
+    if candidates.height > 0:
+        mid = candidates.height // 2
+        representative_run_index = int(candidates["run_index"][mid])
+
+allocation_records = []
+if representative_run_index is not None:
+    prices_path, dividends_path = repo_data_paths(cfg_full["market_data"])
+    history_obj = load_market_history(str(prices_path), str(dividends_path))
+    rep_portfolios = load_run_portfolios(out, strategy, representative_run_index)
+    expanded = reporting_portfolios(rep_portfolios, history_obj, "monthly")
+    for pf in expanded:
+        by_ticker = pf.value_by_ticker(pf.as_of_date, history_obj)
+        total = sum(by_ticker.values())
+        if total <= 0:
+            continue
+        for ticker, value in by_ticker.items():
+            allocation_records.append(
+                {
+                    "date": pf.as_of_date,
+                    "ticker": ticker,
+                    "share": value / total,
+                }
+            )
+    print()
+    print(f"Representative run: index {representative_run_index} (median terminal wealth).")
+    print()
+```
+
+```{python}
+#| fig-cap: "Allocation by ticker over time for the median-terminal-wealth run (step changes mark rebalances)"
+#| fig-width: 6.5
+#| fig-height: 3.5
+#| fig-format: svg
+
+import matplotlib.pyplot as plt
+
+plt.close("all")
+if not allocation_records:
+    print("*No allocation data to render.*")
+else:
+    alloc_df = pl.DataFrame(allocation_records).sort(["date", "ticker"])
+    pivot = alloc_df.pivot(values="share", index="date", on="ticker", aggregate_function="first").fill_null(0.0)
+    tickers_sorted = sorted(
+        [c for c in pivot.columns if c != "date"],
+        key=lambda t: -float(pivot[t].mean()),
+    )
+    dates = pivot["date"].to_list()
+    series = [pivot[t].to_numpy() for t in tickers_sorted]
+    _, ax = plt.subplots(figsize=(6.5, 3.5))
+    ax.stackplot(dates, series, labels=tickers_sorted, alpha=0.85)
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Share of portfolio")
+    ax.set_ylim(0.0, 1.0)
+    ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, frameon=False)
     plt.tight_layout()
 ```
 

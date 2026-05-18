@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,14 @@ import polars as pl
 from investing.history import load_market_history
 from investing.portfolio import Holding, Portfolio
 from investing.reporting import ReportingFrequency, total_value_series
+
+
+def slug_strategy_filename(name: str) -> str:
+    """Filesystem-safe stem for report and cache filenames (Windows-safe)."""
+    s = re.sub(r'[<>:"/\\|?*"\u0000-\u001f]', "_", name.strip())
+    s = re.sub(r"\s+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("._")
+    return (s or "strategy")[:180]
 
 
 def repo_root() -> Path:
@@ -93,3 +102,90 @@ def run_total_value_series(
     prices_path, dividends_path = repo_data_paths(market_data)
     history = load_market_history(str(prices_path), str(dividends_path))
     return total_value_series(portfolios, history, reporting_frequency)
+
+
+_WEALTH_PATHS_SCHEMA: dict[str, Any] = {
+    "run_index": pl.Int64,
+    "date": pl.Date,
+    "value": pl.Float64,
+    "period_offset": pl.Int64,
+    "month_offset": pl.Int64,
+}
+
+
+def _wealth_paths_cache_path(
+    output_dir: Path,
+    strategy: str,
+    reporting_frequency: ReportingFrequency,
+) -> Path:
+    return (
+        output_dir
+        / "wealth_paths"
+        / f"{slug_strategy_filename(strategy)}__{reporting_frequency}.parquet"
+    )
+
+
+def wealth_paths(
+    output_dir: Path,
+    strategy: str,
+    market_data: str,
+    *,
+    reporting_frequency: ReportingFrequency = "monthly",
+    use_cache: bool = True,
+) -> pl.DataFrame:
+    """Aligned per-run portfolio value paths for one strategy.
+
+    Walks every run's snapshots, expands holdings onto the reporting cadence,
+    and prices each step via ``MarketHistory``. Returns a Polars frame with
+    columns ``run_index, date, value, period_offset, month_offset`` — one row
+    per (run, reporting date).
+
+    ``period_offset`` counts reporting periods since each run's first
+    reporting date (0-indexed). ``month_offset`` counts whole calendar months
+    since the run's start date; it is robust to trade-date insertions that
+    cause runs to have different reporting-date counts, so cross-run
+    aggregations (fan charts) should align by ``month_offset``.
+
+    The result is cached under
+    ``output_dir/wealth_paths/<strategy_slug>__<freq>.parquet`` and re-read on
+    subsequent calls. Pass ``use_cache=False`` to force recompute.
+    """
+    cache_path = _wealth_paths_cache_path(output_dir, strategy, reporting_frequency)
+    if use_cache and cache_path.is_file():
+        return pl.read_parquet(cache_path)
+
+    runs_df = pl.read_parquet(output_dir / "runs.parquet").filter(
+        pl.col("strategy") == strategy
+    )
+    if runs_df.height == 0:
+        return pl.DataFrame(schema=_WEALTH_PATHS_SCHEMA)
+
+    prices_path, dividends_path = repo_data_paths(market_data)
+    history = load_market_history(str(prices_path), str(dividends_path))
+
+    rows: list[dict[str, Any]] = []
+    for run_index in sorted(runs_df["run_index"].to_list()):
+        portfolios = load_run_portfolios(output_dir, strategy, int(run_index))
+        dates, vals = total_value_series(portfolios, history, reporting_frequency)
+        if not dates:
+            continue
+        start = dates[0]
+        for period_offset, (d, v) in enumerate(zip(dates, vals, strict=True)):
+            month_offset = (d.year - start.year) * 12 + (d.month - start.month)
+            rows.append(
+                {
+                    "run_index": int(run_index),
+                    "date": d,
+                    "value": float(v),
+                    "period_offset": period_offset,
+                    "month_offset": month_offset,
+                }
+            )
+
+    df = pl.DataFrame(rows, schema=_WEALTH_PATHS_SCHEMA)
+
+    if use_cache:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        df.write_parquet(cache_path)
+
+    return df

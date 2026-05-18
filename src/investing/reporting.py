@@ -66,11 +66,18 @@ def _reporting_dates(
     return sorted(set(cadence_dates + trade_dates))
 
 
-def _reporting_portfolios(
+def reporting_portfolios(
     portfolios: list[Portfolio],
     history: MarketHistory,
     reporting_frequency: ReportingFrequency,
 ) -> list[Portfolio]:
+    """Expand sparse portfolio snapshots onto the reporting cadence.
+
+    The simulator only snapshots on rebalance / end dates. This helper
+    forward-fills the most recent holdings onto every reporting date (daily
+    trading days, weekly calendar steps, or monthly calendar steps), preserving
+    quantities while letting downstream callers mark to market via prices.
+    """
     if not portfolios:
         return []
 
@@ -106,7 +113,7 @@ def position_history(
     history: MarketHistory,
     reporting_frequency: ReportingFrequency,
 ) -> pl.DataFrame:
-    expanded = _reporting_portfolios(portfolios, history, reporting_frequency)
+    expanded = reporting_portfolios(portfolios, history, reporting_frequency)
     if not expanded:
         return pl.DataFrame(
             schema={

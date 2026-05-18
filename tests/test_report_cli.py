@@ -12,7 +12,7 @@ from investing.report_cli import _inject_report_parameters
 
 from investing.report_cli import main as report_main
 
-from investing.report_cli import slug_strategy_filename
+from investing.simulation_output import slug_strategy_filename
 
 
 _PARAM_BLOCK = """# <<investing-report-parameters>>
